@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.1.5 — 2026-08-22
+
+### Changed
+- Published the post-migration ESPressio Threads package generation from `ESPressio-Development-Platform`.
+- Raised required ESPressio Timing from `>=2.2.4 <3.0.0` to `>=2.2.5 <3.0.0`.
+- Raised required ESPressio Observable from `>=3.0.1 <4.0.0` to `>=3.0.2 <4.0.0`.
+- Updated package metadata, README installation/dependency guidance, CI validation, and dependency documentation.
+
+### Compatibility
+- No Threads public API or runtime behaviour changes are introduced by this repository-relocation patch release.
+
 All notable changes to this project are documented in this file.
 
 The structure follows the principles of [Keep a
