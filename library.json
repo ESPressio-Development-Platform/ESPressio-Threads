@@ -12,23 +12,19 @@
         "type": "git",
         "url": "https://github.com/ESPressio-Development-Platform/ESPressio-Threads.git"
     },
-    "version": "3.1.4",
+    "version": "3.1.5",
     "license": "Apache-2.0",
-    "frameworks": [
-        "arduino"
-    ],
-    "platforms": [
-        "espressif32"
-    ],
+    "frameworks": ["arduino"],
+    "platforms": ["espressif32"],
     "dependencies": [
         {
             "name": "ESPressio-Timing",
-            "version": ">=2.2.4 <3.0.0",
+            "version": ">=2.2.5 <3.0.0",
             "url": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git"
         },
         {
             "name": "ESPressio-Observable",
-            "version": ">=3.0.1 <4.0.0",
+            "version": ">=3.0.2 <4.0.0",
             "url": "https://github.com/ESPressio-Development-Platform/ESPressio-Observable.git"
         }
     ]
