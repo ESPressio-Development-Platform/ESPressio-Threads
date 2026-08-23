@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.1.6 — 2026-08-23
+
+### Changed
+- Raised required ESPressio Timing from `>=2.2.5 <3.0.0` to `>=2.2.6 <3.0.0`, propagating Units 0.2.5 downstream.
+- Updated package metadata and CI validation for the 3.1.6 cascade generation.
+- Added explicit ESP32 compile validation of the opt-in `ESPressio_PrecisionThread_Serializable.hpp` surface with Units 0.2.5 and Serializable 0.11.1.
+
+### Compatibility
+- Threads retains no direct Serializable dependency; Serializable PrecisionThread representations remain opt-in.
+- No public Threads API or runtime behaviour changes are introduced by this dependency-maintenance release.
+
 ## 3.1.5 — 2026-08-22
 
 ### Changed
