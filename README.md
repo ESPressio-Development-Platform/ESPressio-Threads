@@ -4,24 +4,24 @@ Threading Components of the ESPressio Development Platform.
 Light-weight and easy-to-use Threading for your Microcontroller development work.
 
 ## Current Source Version
-This source tree is version **3.1.5**.
+This source tree is version **3.1.6**.
 
 Refer to the GitHub Releases page for the latest published release/tag.
 
 Current required ESPressio baselines:
 
 ```text
-Timing >= 2.2.5 < 3.0.0
+Timing >= 2.2.7 < 3.0.0
 Observable >= 3.0.2 < 4.0.0
 ```
 
-Timing 2.2.5 carries Units 0.2.4 and optional Serializable 0.10.3 downstream; Serializable remains optional through Serializable Unit representations rather than becoming a direct Threads dependency.
+Timing 2.2.7 carries Units 0.2.6 downstream. Threads itself remains independent of ESPressio Serializable; applications that opt into `ESPressio_PrecisionThread_Serializable.hpp` use Serializable Unit time/frequency representations and the 3.1.6 release is validated against Serializable 0.11.2.
 
 ## Compatibility
 
-ESPressio Threads `3.1.5` targets the **ESP32 family under Arduino-ESP32**. This includes classic ESP32 and current single- and multi-core variants such as ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6, ESP32-H2, and ESP32-P4 when supported by the installed Arduino-ESP32/framework version. Single-core devices use CPU 0; multiple hardware cores are not required.
+ESPressio Threads `3.1.6` targets the **ESP32 family under Arduino-ESP32**. This includes classic ESP32 and current single- and multi-core variants such as ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6, ESP32-H2, and ESP32-P4 when supported by the installed Arduino-ESP32/framework version. Single-core devices use CPU 0; multiple hardware cores are not required.
 
-The implementation directly uses ESP-IDF FreeRTOS task, queue, semaphore, and task-local-storage APIs through Arduino-ESP32. The source architecture remains intentionally close to ESP-IDF and the repository retains its CMake/component files, but the `3.1.5` PlatformIO package does **not currently advertise pure ESP-IDF framework support** because the published ESPressio Timing/Units dependency chain does not yet advertise the same framework compatibility.
+The implementation directly uses ESP-IDF FreeRTOS task, queue, semaphore, and task-local-storage APIs through Arduino-ESP32. The source architecture remains intentionally close to ESP-IDF and the repository retains its CMake/component files, but the `3.1.6` PlatformIO package does **not currently advertise pure ESP-IDF framework support** because the published ESPressio Timing/Units dependency chain does not yet advertise the same framework compatibility.
 
 The library is not compatible with ESP8266 or non-ESP32 families such as AVR, SAMD, RP2040, STM32, or Renesas merely because another FreeRTOS port is available there.
 
@@ -73,7 +73,7 @@ You can quickly and easily add this library to your project in PlatformIO by sim
 
 ```ini
 lib_deps =
-    espressio-development-platform/ESPressio-Threads@^3.1.5
+    espressio-development-platform/ESPressio-Threads@^3.1.6
 ```
 
 Alternatively, if you want to use the bleeding-edge (effectively "Developer Integration Testing" or "DIT") sources, you can instead use:
@@ -103,7 +103,7 @@ In this way, multiple distinct contexts can be progressed without having to wait
 ## Thread Safety
 Those of you familiar with multi-threading will already be aware of the need to enforce careful *thread-safety* when working with multiple `Thread`s.
 
-*ESPressio* Threads makes it easy, providing multiple choices of *Thread-Safe Locks* for you to easily use.
+*ESPressio Threads* makes it easy, providing multiple choices of *Thread-Safe Locks* for you to easily use.
 
 You'll see an example later in this document.
 
@@ -792,6 +792,8 @@ protected:
 };
 ```
 
+The Threads 3.1.6 release validates this opt-in surface against **Timing 2.2.7**, **Units 0.2.6**, and **Serializable 0.11.2**.
+
 ### Migrating from 2.x
 
 `PrecisionThread` and `IPrecisionThreadObserver` are now templates. Existing
@@ -802,7 +804,7 @@ Code referring to `Timing::ClockTime` should use
 `Timing::DefaultClockTime`, or the Precision Thread's `IterationTime` /
 `TimeType` aliases.
 
-ESPressio Threads 3.1.2 requires:
+The original 3.1.2 migration baseline was:
 
 ```text
 ESPressio-Timing >= 2.2.2 < 3.0.0
