@@ -70,11 +70,11 @@ jobs:
           #include <ESPressio_PrecisionThread.hpp>
           #include <ESPressio_PrecisionThread_Serializable.hpp>
 
-          using SerializableTime = ESPressio::Units::SerializableNanoSeconds<uint64_t>;
-          using SerializablePrecisionThread = ESPressio::Threads::PrecisionThread<SerializableTime>;
-          using Traits = ESPressio::Threads::PrecisionThreadTraits<SerializableTime>;
+          using SerializableThreadTime = ESPressio::Units::SerializableNanoSeconds<uint64_t>;
+          using SerializablePrecisionThread = ESPressio::Threads::PrecisionThread<SerializableThreadTime>;
+          using Traits = ESPressio::Threads::PrecisionThreadTraits<SerializableThreadTime>;
 
-          static_assert(std::is_same_v<typename Traits::IterationTime, SerializableTime>);
+          static_assert(std::is_same_v<typename Traits::IterationTime, SerializableThreadTime>);
           static_assert(std::is_same_v<typename Traits::IterationFrequency, ESPressio::Units::SerializableFrequency<double>>);
 
           void setup() {
