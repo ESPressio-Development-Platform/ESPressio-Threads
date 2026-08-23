@@ -1,17 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="560" viewBox="0 0 1000 560">
 <style>text{font-family:Arial,sans-serif;fill:#111}.title{font-size:26px;font-weight:700}.node{fill:#fff;stroke:#222;stroke-width:2}.label{font-size:15px;font-weight:600;text-anchor:middle}.small{font-size:12px;text-anchor:middle}.edge{stroke:#333;stroke-width:2;fill:none;marker-end:url(#arrow)}.optional{stroke-dasharray:7 6}</style>
 <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#333"/></marker></defs>
-<text class="title" x="35" y="45">ESPressio Serializable 0.11.2 Cascade — Threads 3.1.6</text>
-<rect class="node" x="35" y="110" width="180" height="62" rx="8"/><text class="label" x="125" y="140">Serializable 0.11.2</text>
-<rect class="node" x="270" y="110" width="150" height="62" rx="8"/><text class="label" x="345" y="140">Units 0.2.6</text>
-<rect class="node" x="475" y="110" width="160" height="62" rx="8"/><text class="label" x="555" y="140">Timing 2.2.7</text>
-<rect class="node" x="690" y="110" width="170" height="62" rx="8"/><text class="label" x="775" y="140">Threads 3.1.6</text>
+<text class="title" x="35" y="45">ESPressio Serializable 0.11.3 Cascade — Threads 3.1.7</text>
+<rect class="node" x="35" y="110" width="180" height="62" rx="8"/><text class="label" x="125" y="140">Serializable 0.11.3</text>
+<rect class="node" x="270" y="110" width="150" height="62" rx="8"/><text class="label" x="345" y="140">Units 0.2.7</text>
+<rect class="node" x="475" y="110" width="160" height="62" rx="8"/><text class="label" x="555" y="140">Timing 2.2.8</text>
+<rect class="node" x="690" y="110" width="170" height="62" rx="8"/><text class="label" x="775" y="140">Threads 3.1.7</text>
 <path class="edge optional" d="M270 141 L215 141"/><path class="edge" d="M475 141 L420 141"/><path class="edge" d="M690 141 L635 141"/>
 <rect class="node" x="690" y="260" width="170" height="62" rx="8"/><text class="label" x="775" y="290">Observable 3.0.2</text>
 <path class="edge" d="M775 172 L775 260"/>
 <text class="small" x="345" y="200">Serializable Units are opt-in</text>
 <text class="small" x="775" y="350">Threads → Timing and Threads → Observable are required.</text>
 <text class="small" x="775" y="372">Serializable PrecisionThread support is opt-in through Units.</text>
-<text class="label" x="500" y="445">Next propagation: Event 6.0.2 → Command / Security → downstream transports → Serial</text>
+<text class="label" x="500" y="445">Next propagation: Event 6.0.3 → Command / Security → downstream transports → Serial</text>
 <text class="small" x="500" y="485">Solid arrows: required. Dashed arrow: opt-in integration.</text>
 </svg>
