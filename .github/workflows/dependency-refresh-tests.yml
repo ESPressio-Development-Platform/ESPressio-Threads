@@ -18,18 +18,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Timing
-          ref: 2.2.5
+          ref: 2.2.6
           path: project/dependencies/ESPressio-Timing
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Units
-          ref: 0.2.4
+          ref: 0.2.5
           path: project/dependencies/ESPressio-Units
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Observable
           ref: 3.0.2
           path: project/dependencies/ESPressio-Observable
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Serializable
+          ref: 0.11.1
+          path: project/dependencies/ESPressio-Serializable
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
@@ -53,16 +58,35 @@ jobs:
           lib_ldf_mode = deep+
           lib_deps =
               ../dependencies/ESPressio-Observable
+              ../dependencies/ESPressio-Serializable
               ../dependencies/ESPressio-Units
               ../dependencies/ESPressio-Timing
               ../ESPressio-Threads
           EOF
           cat > project/compile/src/main.cpp <<'EOF'
           #include <Arduino.h>
+          #include <type_traits>
           #include <ESPressio_Thread.hpp>
           #include <ESPressio_PrecisionThread.hpp>
-          void setup() {}
+          #include <ESPressio_PrecisionThread_Serializable.hpp>
+
+          using SerializableTime = ESPressio::Units::SerializableNanoSeconds<uint64_t>;
+          using SerializablePrecisionThread = ESPressio::Threads::PrecisionThread<SerializableTime>;
+          using Traits = ESPressio::Threads::PrecisionThreadTraits<SerializableTime>;
+
+          static_assert(std::is_same_v<typename Traits::IterationTime, SerializableTime>);
+          static_assert(std::is_same_v<typename Traits::IterationFrequency, ESPressio::Units::SerializableFrequency<double>>);
+
+          void setup() {
+              typename Traits::SignedIterationTime signedTime =
+                  Traits::CreateSignedIterationTime(1000);
+              typename Traits::IterationFrequency frequency =
+                  Traits::CreateIterationFrequency(50.0);
+              (void)signedTime;
+              (void)frequency;
+              (void)sizeof(SerializablePrecisionThread*);
+          }
           void loop() {}
           EOF
-      - name: Compile Threads against migrated Timing/Units/Observable releases
+      - name: Compile Threads against Timing 2.2.6 and Serializable PrecisionThread surface
         run: pio run -d project/compile
