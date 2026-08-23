@@ -19,7 +19,7 @@
     "dependencies": [
         {
             "name": "ESPressio-Timing",
-            "version": ">=2.2.6 <3.0.0",
+            "version": ">=2.2.7 <3.0.0",
             "url": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git"
         },
         {
