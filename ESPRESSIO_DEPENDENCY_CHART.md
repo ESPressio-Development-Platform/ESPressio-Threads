@@ -1,4 +1,4 @@
-# ESPressio Dependency Chart — Serializable 0.11.2 Cascade
+# ESPressio Dependency Chart — Serializable 0.11.3 Cascade
 
 ![ESPressio Library Dependency Chart](ESPRESSIO_DEPENDENCY_CHART.svg)
 
@@ -8,24 +8,24 @@ Arrows point from a consuming library to the library it consumes. **Required** e
 
 ```text
 Observable    3.0.2
-Serializable  0.11.2
-Units         0.2.6
-Timing        2.2.7
-Threads       3.1.6   (this release)
+Serializable  0.11.3
+Units         0.2.7
+Timing        2.2.8
+Threads       3.1.7   (this release)
 ```
 
 ## Current Threads edges
 
 ```text
-Threads 3.1.6
-    -> Timing >= 2.2.7 < 3.0.0        required
+Threads 3.1.7
+    -> Timing >= 2.2.8 < 3.0.0        required
     -> Observable >= 3.0.2 < 4.0.0    required
 
 Threads
     - - -> Serializable                opt-in/transitive only
             via ESPressio_PrecisionThread_Serializable.hpp
             and Units Serializable time/frequency representations
-            validated with Units 0.2.6 + Serializable 0.11.2
+            validated with Units 0.2.7 + Serializable 0.11.3
 ```
 
 Threads deliberately does **not** declare Serializable as a core package dependency. The ordinary `ESPressio_PrecisionThread.hpp` surface remains serialization-agnostic.
@@ -33,19 +33,19 @@ Threads deliberately does **not** declare Serializable as a core package depende
 ## Cascade propagation
 
 ```text
-Serializable 0.11.2
+Serializable 0.11.3
         |
         v
-Units 0.2.6
+Units 0.2.7
         |
         v
-Timing 2.2.7
+Timing 2.2.8
         |
         v
-Threads 3.1.6
+Threads 3.1.7
         |
         v
-Event 6.0.2
+Event 6.0.3
         |
         +--> Command / Security
         |          |
