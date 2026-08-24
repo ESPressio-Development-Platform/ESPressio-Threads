@@ -12,7 +12,7 @@ Full-stack ESP32 hardware validation exposed severe internal-RAM pressure when T
 ### Planned low-risk/high-gain work
 - Measure and reduce over-conservative task-stack defaults only where a safe margin can be demonstrated.
 - Consolidate scalar configuration/state synchronization where equivalent concurrency guarantees can be preserved with atomics or one compact lock.
-- Remove unnecessary heap/shared ownership for per-Thread lifecycle observable state where object lifetime already provides ownership.
+- Remove unnecessary heap/shared ownership only where the underlying type's ownership contract permits it.
 - Preserve initialization, lifecycle, observer, termination-dispatch, garbage-collection and callback reentrancy semantics.
 - Add regression/stress coverage before accepting concurrency-sensitive changes.
 
@@ -33,9 +33,9 @@ A new `Resource Profile Regression` PlatformIO workflow compiles both the defaul
 
 Commits: `6bfa8d8707cdc509285390b32842205d848794a0`, `1d9beac867f53e384dcbc9d1d10cc80f73c6c530`.
 
-## 2026-08-25 — Remove heap ownership from process-lifetime infrastructure observables (#69)
+## 2026-08-25 — Attempted direct ownership of process-lifetime infrastructure observables (#69)
 
-`ThreadTerminationDispatcher` and `ThreadGarbageCollector` were changed to own their observable objects directly instead of through `std::shared_ptr`/`std::make_shared`.
+`ThreadTerminationDispatcher` and `ThreadGarbageCollector` were temporarily changed to own their Observable-derived helper objects directly instead of through `std::shared_ptr`/`std::make_shared`.
 
 ### Original rationale
 Both owners are process-lifetime singletons, so shared lifetime management initially appeared unnecessary. The intent was to remove two heap allocations, two shared-pointer control blocks and associated startup fragmentation.
@@ -71,7 +71,7 @@ The active Event, WiFi and ESP-Now working branches now resolve ESPressio Thread
 
 A high-gain candidate remains: `Thread` currently carries separate `ReadWriteMutex` wrappers for `freeOnTerminate`, `startOnInitialize`, stack size, priority and core ID in addition to an existing `_taskConfigurationMutex`. Each wrapper contains a `std::shared_mutex` plus callback/comparison `std::function` state. Consolidating these is expected to produce meaningful per-Thread savings.
 
-This has deliberately not been bundled into the first tranche because `_initialize()` currently holds `_taskConfigurationMutex` while calling the public configuration getters. A safe implementation therefore requires an explicit configuration snapshot/atomic design plus race/reentrancy tests; simply adding getter locking would deadlock. It will be addressed as a separate #69 change after this green checkpoint.
+This has deliberately not been bundled into the first tranche because `_initialize()` currently holds `_taskConfigurationMutex` while calling the public configuration getters. A safe implementation therefore requires an explicit configuration snapshot/atomic design plus race/reentrancy tests; simply adding getter locking would deadlock. It will be addressed as a separate #69 change after this corrected hardware checkpoint.
 
-### Validation checkpoint
-Before the ownership fault was exposed by hardware, the existing Critical TLS / Task Exit Regression, including ESP32 pthread and WiFi-driver coexistence compilation, completed successfully on the optimisation branch. The hardware failure demonstrates that compile/host coverage did not exercise this notification-ownership path; future regression coverage must include actual notification invocation for infrastructure Observables.
+### Validation note
+The earlier CI checkpoint was green but did not exercise the Observable notification ownership path that failed on device. Hardware validation therefore caught a real coverage gap. Future acceptance of ownership-related optimisations requires a test that actually invokes notifications under the proposed ownership model.
