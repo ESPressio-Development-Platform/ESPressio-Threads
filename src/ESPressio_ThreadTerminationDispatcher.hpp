@@ -4,8 +4,6 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
-#include <memory>
-
 #include <ESPressio_IObservable.hpp>
 
 #include "ESPressio_IThreadTerminationDispatcherObserver.hpp"
@@ -131,11 +129,8 @@ namespace Threads {
         QueueHandle_t _queue = nullptr;
         TaskHandle_t _taskHandle = nullptr;
 
-        std::shared_ptr<DispatcherObservable>
-            _observable =
-                std::make_shared<
-                    DispatcherObservable
-                >();
+        DispatcherObservable
+            _observable;
 
 
         ThreadTerminationDispatcher();
@@ -172,7 +167,7 @@ namespace Threads {
             IThreadTerminationDispatcherObserver* observer
         ) {
             auto handle =
-                _observable->RegisterObserver(
+                _observable.RegisterObserver(
                     observer
                 );
 
@@ -193,7 +188,7 @@ namespace Threads {
         void UnregisterObserver(
             IThreadTerminationDispatcherObserver* observer
         ) {
-            _observable->UnregisterObserver(
+            _observable.UnregisterObserver(
                 observer
             );
         }
