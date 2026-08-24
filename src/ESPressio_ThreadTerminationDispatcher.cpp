@@ -46,7 +46,7 @@ namespace Threads {
             );
 
         if (_queue == nullptr) {
-            _observable.Initialized(false);
+            _observable->Initialized(false);
             return;
         }
 
@@ -66,11 +66,11 @@ namespace Threads {
             _queue = nullptr;
             _taskHandle = nullptr;
 
-            _observable.Initialized(false);
+            _observable->Initialized(false);
             return;
         }
 
-        _observable.Initialized(true);
+        _observable->Initialized(true);
     }
 
 
@@ -108,7 +108,7 @@ namespace Threads {
                 continue;
             }
 
-            _observable.Started(
+            _observable->Started(
                 record.Snapshot
             );
 
@@ -119,7 +119,7 @@ namespace Threads {
              * Do not dereference the Thread after termination dispatch:
              * automatic GC can now own its eventual destruction.
              */
-            _observable.Completed(
+            _observable->Completed(
                 record.Snapshot
             );
         }
@@ -187,11 +187,11 @@ namespace Threads {
             ) == pdTRUE;
 
         if (queued) {
-            _observable.Queued(
+            _observable->Queued(
                 record.Snapshot
             );
         } else {
-            _observable.QueueFailed(
+            _observable->QueueFailed(
                 record.Snapshot
             );
         }
