@@ -18,3 +18,42 @@ Full-stack ESP32 hardware validation exposed severe internal-RAM pressure when T
 
 ### Safety / rollback
 No optimisation is accepted solely for memory savings. Changes must preserve behavioral and thread-safety guarantees. The rollback branch above remains an immutable pre-optimisation reference.
+
+## 2026-08-25 — Right-size termination-dispatch queue (#69)
+
+The default `ESPRESSIO_THREAD_TERMINATION_QUEUE_LENGTH` was reduced from 256 to 32.
+
+### Rationale
+Each queue entry contains a `Thread*` and `ThreadManagerThreadSnapshot`. Reserving 256 entries consumes several kilobytes of internal RAM even on systems with only a small number of Threads. The termination path already uses `xQueueSend(..., portMAX_DELAY)`, so queue saturation applies backpressure rather than dropping a termination request. A 32-entry default is therefore a substantially smaller bounded reservation without weakening delivery semantics.
+
+The macro remains overrideable for unusually large workloads.
+
+### Verification
+A new `Resource Profile Regression` PlatformIO workflow compiles both the default profile and an explicit 64-entry override, guarding both the new default and continued configurability.
+
+Commits: `6bfa8d8707cdc509285390b32842205d848794a0`, `1d9beac867f53e384dcbc9d1d10cc80f73c6c530`.
+
+## 2026-08-25 — Remove heap ownership from process-lifetime infrastructure observables (#69)
+
+`ThreadTerminationDispatcher` and `ThreadGarbageCollector` now own their observable objects directly instead of through `std::shared_ptr`/`std::make_shared`.
+
+### Rationale
+Both owners are process-lifetime singletons, so shared lifetime management cannot extend the useful lifetime of these observable objects. Direct ownership removes two heap allocations, two shared-pointer control blocks and associated startup fragmentation while preserving the observer APIs and singleton lifetime.
+
+### Safety
+No per-Thread observer ownership was changed in this tranche. In particular, `Thread::_lifecycleObservable` remains shared until external observer-handle lifetime behavior has been separately proven safe for direct ownership.
+
+Commits: `bb5dede5fb4665beaccccf4900bf04b2f72a84d7`, `b40669729c6881d215d6690d0b056be1b0329487`, `5541d5ce61f358f679651a085f75ce85cd4150f5`.
+
+## 2026-08-25 — Downstream working branches pinned to Threads #69
+
+The active Event, WiFi and ESP-Now working branches now resolve ESPressio Threads directly from `optimisation/69-resource-footprint` so their CI/hardware testing cannot accidentally validate against released 3.1.7 while this optimisation round is active.
+
+### Deferred candidate: per-Thread scalar/configuration wrapper consolidation
+
+A high-gain candidate remains: `Thread` currently carries separate `ReadWriteMutex` wrappers for `freeOnTerminate`, `startOnInitialize`, stack size, priority and core ID in addition to an existing `_taskConfigurationMutex`. Each wrapper contains a `std::shared_mutex` plus callback/comparison `std::function` state. Consolidating these is expected to produce meaningful per-Thread savings.
+
+This has deliberately not been bundled into the first tranche because `_initialize()` currently holds `_taskConfigurationMutex` while calling the public configuration getters. A safe implementation therefore requires an explicit configuration snapshot/atomic design plus race/reentrancy tests; simply adding getter locking would deadlock. It will be addressed as a separate #69 change after this green checkpoint.
+
+### Validation checkpoint
+At this checkpoint the existing Critical TLS / Task Exit Regression, including ESP32 pthread and WiFi-driver coexistence compilation, completes successfully on the optimisation branch.
