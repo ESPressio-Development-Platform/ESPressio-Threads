@@ -12,14 +12,14 @@
         "type": "git",
         "url": "https://github.com/ESPressio-Development-Platform/ESPressio-Threads.git"
     },
-    "version": "3.1.6",
+    "version": "3.1.7",
     "license": "Apache-2.0",
     "frameworks": ["arduino"],
     "platforms": ["espressif32"],
     "dependencies": [
         {
             "name": "ESPressio-Timing",
-            "version": ">=2.2.7 <3.0.0",
+            "version": ">=2.2.8 <3.0.0",
             "url": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git"
         },
         {

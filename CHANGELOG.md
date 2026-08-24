@@ -1,5 +1,22 @@
 # Changelog
 
+## 3.1.7 — 2026-08-24
+
+### Changed
+- Raised required ESPressio Timing from `>=2.2.7 <3.0.0` to `>=2.2.8 <3.0.0`, propagating the Units 0.2.7 / Serializable 0.11.3 generation downstream.
+- Preserved the required ESPressio Observable baseline at `>=3.0.2 <4.0.0`.
+- Updated package metadata and CI validation for Threads 3.1.7.
+- Updated explicit ESP32 compile validation of the opt-in `ESPressio_PrecisionThread_Serializable.hpp` surface against Timing 2.2.8, Units 0.2.7 and Serializable 0.11.3.
+- Preserved the core dependency boundary: Threads depends directly on Timing and Observable only; Serializable support remains opt-in through Serializable Unit time/frequency representations.
+- Updated README and current dependency documentation for the new cascade generation.
+
+### Compatibility
+- Threads retains no direct Serializable dependency; Serializable PrecisionThread representations remain opt-in.
+- No public Threads API or runtime behaviour changes are introduced by this dependency-maintenance release.
+
+### Cascade
+- Continues the release train: `Serializable 0.11.3 -> Units 0.2.7 -> Timing 2.2.8 -> Threads 3.1.7 -> Event 6.0.3 -> downstream integrations`.
+
 ## 3.1.6 — 2026-08-23
 
 ### Changed
