@@ -5,7 +5,6 @@
 #include "freertos/task.h"
 
 #include <exception>
-#include <memory>
 #include <mutex>
 
 #include "ESPressio_ThreadManager.hpp"
@@ -176,12 +175,8 @@ namespace Threads {
         mutable std::mutex
             _initializationMutex;
 
-        std::shared_ptr<
-            GarbageCollectorObservable
-        > _observable =
-            std::make_shared<
-                GarbageCollectorObservable
-            >();
+        GarbageCollectorObservable
+            _observable;
 
 
         ThreadGarbageCollector() {
@@ -189,9 +184,9 @@ namespace Threads {
                 _initialize();
 
             if (available) {
-                _observable->Initialized(true);
+                _observable.Initialized(true);
             } else {
-                _observable->InitializationFailed();
+                _observable.InitializationFailed();
             }
         }
 
@@ -275,7 +270,7 @@ namespace Threads {
                 result.RequestQueued =
                     true;
 
-                _observable->Started(
+                _observable.Started(
                     result
                 );
 
@@ -288,13 +283,13 @@ namespace Threads {
                     result.Completed =
                         !result.ManagerResult.WasDeferred;
 
-                    _observable->Completed(
+                    _observable.Completed(
                         result
                     );
                 } catch (...) {
                     result.Failed = true;
 
-                    _observable->Failed(
+                    _observable.Failed(
                         result,
                         std::current_exception()
                     );
@@ -367,7 +362,7 @@ namespace Threads {
                     !wasAvailable &&
                     infrastructureAvailable
                 ) {
-                    _observable->Initialized(
+                    _observable.Initialized(
                         true
                     );
                 }
@@ -379,7 +374,7 @@ namespace Threads {
             }
 
             if (semaphore != nullptr) {
-                _observable->Requested(
+                _observable.Requested(
                     ThreadGarbageCollectionExecutionMode::
                         AsynchronousWorker
                 );
@@ -399,7 +394,7 @@ namespace Threads {
                     ) == pdTRUE;
 
                 if (result.RequestQueued) {
-                    _observable->Queued(
+                    _observable.Queued(
                         result
                     );
                 } else {
@@ -407,7 +402,7 @@ namespace Threads {
                      * The binary semaphore is already pending. This request
                      * has been coalesced into the existing cleanup request.
                      */
-                    _observable->Coalesced(
+                    _observable.Coalesced(
                         result
                     );
                 }
@@ -415,7 +410,7 @@ namespace Threads {
                 return;
             }
 
-            _observable->Requested(
+            _observable.Requested(
                 ThreadGarbageCollectionExecutionMode::
                     SynchronousFallback
             );
@@ -429,7 +424,7 @@ namespace Threads {
             result.InfrastructureAvailable =
                 false;
 
-            _observable->FallbackStarted(
+            _observable.FallbackStarted(
                 result
             );
 
@@ -442,13 +437,13 @@ namespace Threads {
                 result.Completed =
                     !result.ManagerResult.WasDeferred;
 
-                _observable->Completed(
+                _observable.Completed(
                     result
                 );
             } catch (...) {
                 result.Failed = true;
 
-                _observable->Failed(
+                _observable.Failed(
                     result,
                     std::current_exception()
                 );
@@ -466,7 +461,7 @@ namespace Threads {
             IThreadGarbageCollectorObserver* observer
         ) override {
             auto handle =
-                _observable->RegisterObserver(
+                _observable.RegisterObserver(
                     observer
                 );
 
@@ -492,7 +487,7 @@ namespace Threads {
         void UnregisterObserver(
             IThreadGarbageCollectorObserver* observer
         ) override {
-            _observable->UnregisterObserver(
+            _observable.UnregisterObserver(
                 observer
             );
         }
