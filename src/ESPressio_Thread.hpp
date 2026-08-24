@@ -19,19 +19,6 @@
     #define ESPRESSIO_THREAD_DEFAULT_STACK_SIZE 4000
 #endif
 
-#ifndef ESPRESSIO_THREAD_TLS_INDEX
-    #define ESPRESSIO_THREAD_TLS_INDEX 0
-#endif
-
-#if defined(configNUM_THREAD_LOCAL_STORAGE_POINTERS)
-    static_assert(
-        ESPRESSIO_THREAD_TLS_INDEX >= 0 &&
-        ESPRESSIO_THREAD_TLS_INDEX <
-            configNUM_THREAD_LOCAL_STORAGE_POINTERS,
-        "ESPRESSIO_THREAD_TLS_INDEX is outside the configured FreeRTOS TLS range"
-    );
-#endif
-
 namespace ESPressio {
 
     namespace Threads {
@@ -306,6 +293,11 @@ namespace ESPressio {
                         false
                     };
 
+                std::atomic<bool>
+                    _taskExitFinalizationStarted{
+                        false
+                    };
+
                 std::atomic<CleanupClaim>
                     _cleanupClaim{
                         CleanupClaim::
@@ -479,6 +471,83 @@ namespace ESPressio {
                 );
 
                 void _dispatchTermination();
+
+
+                bool _beginTaskExitFinalization() noexcept {
+                    bool expected = false;
+
+                    return
+                        _taskExitFinalizationStarted.
+                            compare_exchange_strong(
+                                expected,
+                                true,
+                                std::memory_order_acq_rel,
+                                std::memory_order_acquire
+                            );
+                }
+
+
+                bool _queueTaskExitFinalization() noexcept {
+                    _terminationDispatchPending.store(
+                        true,
+                        std::memory_order_release
+                    );
+
+                    if (
+                        _queueTerminationDispatch(this)
+                    ) {
+                        return true;
+                    }
+
+                    _terminationDispatchPending.store(
+                        false,
+                        std::memory_order_release
+                    );
+
+                    return false;
+                }
+
+
+                void _finalizeStoppedTaskExit() noexcept {
+                    if (
+                        !_beginTaskExitFinalization()
+                    ) {
+                        return;
+                    }
+
+                    _queueTaskExitFinalization();
+                }
+
+
+                [[noreturn]] void
+                _finalizeCurrentTaskExit() noexcept {
+                    if (
+                        _beginTaskExitFinalization()
+                    ) {
+                        try {
+                            TrySetThreadState(
+                                ThreadState::Terminating,
+                                ThreadState::Terminated
+                            );
+                        } catch (...) {
+                        }
+
+                        _queueTaskExitFinalization();
+                    }
+
+                    /*
+                     * The termination dispatcher owns deletion of an exited
+                     * ESPressio task. Suspending here guarantees that the
+                     * Thread object remains alive until the dispatcher has
+                     * deleted the underlying FreeRTOS task and completed the
+                     * deferred termination callbacks/observer notification.
+                     */
+                    vTaskSuspend(nullptr);
+
+                    for (;;) {
+                        vTaskDelay(portMAX_DELAY);
+                    }
+                }
 
 
                 void _dispatchExecutionFailed(
@@ -1028,6 +1097,11 @@ namespace ESPressio {
                         0
                     );
 
+                    _taskExitFinalizationStarted.store(
+                        false,
+                        std::memory_order_release
+                    );
+
                     const BaseType_t result =
                         xTaskCreatePinnedToCore(
                             [](void* parameter) {
@@ -1058,32 +1132,7 @@ namespace ESPressio {
                                     }
 
                                     instance->
-                                        _terminationDispatchPending.
-                                            store(
-                                                true,
-                                                std::memory_order_release
-                                            );
-
-                                    const TaskHandle_t
-                                        currentTask =
-                                            xTaskGetCurrentTaskHandle();
-
-                                    TaskHandle_t expected =
-                                        currentTask;
-
-                                    instance->_taskHandle.
-                                        compare_exchange_strong(
-                                            expected,
-                                            nullptr,
-                                            std::memory_order_acq_rel,
-                                            std::memory_order_acquire
-                                        );
-
-                                    instance->
-                                        TrySetThreadState(
-                                            ThreadState::Terminating,
-                                            ThreadState::Terminated
-                                        );
+                                        _finalizeCurrentTaskExit();
                                 }
 
                                 vTaskDelete(
@@ -1127,83 +1176,6 @@ namespace ESPressio {
                             ThreadInitializationStatus::
                                 ConcurrentInitializationLost;
                     }
-
-                    vTaskSetThreadLocalStoragePointerAndDelCallback(
-                        createdTask,
-                        ESPRESSIO_THREAD_TLS_INDEX,
-                        this,
-                        [](int, void* value) {
-                            Thread* instance =
-                                static_cast<
-                                    Thread*
-                                >(value);
-
-                            if (
-                                instance ==
-                                nullptr
-                            ) {
-                                return;
-                            }
-
-                            if (
-                                instance->
-                                    GetThreadState() !=
-                                ThreadState::Terminated
-                            ) {
-                                instance->
-                                    _terminationDispatchPending.
-                                        store(
-                                            false,
-                                            std::memory_order_release
-                                        );
-
-                                if (
-                                    instance->
-                                        _taskExited !=
-                                    nullptr
-                                ) {
-                                    xSemaphoreGive(
-                                        instance->
-                                            _taskExited
-                                    );
-                                }
-
-                                return;
-                            }
-
-                            instance->
-                                _terminationDispatchPending.
-                                    store(
-                                        true,
-                                        std::memory_order_release
-                                    );
-
-                            if (
-                                !Thread::
-                                    _queueTerminationDispatch(
-                                        instance
-                                    )
-                            ) {
-                                if (
-                                    instance->
-                                        _taskExited !=
-                                    nullptr
-                                ) {
-                                    xSemaphoreGive(
-                                        instance->
-                                            _taskExited
-                                    );
-                                }
-
-                                instance->
-                                    _terminationDispatchPending.
-                                        store(
-                                            false,
-                                            std::memory_order_release
-                                        );
-                            }
-                        }
-                    );
 
                     configurationLock.unlock();
 
@@ -1269,6 +1241,7 @@ namespace ESPressio {
                             }
 
                             _deleteTask();
+                            _finalizeStoppedTaskExit();
 
                             return
                                 ThreadInitializationStatus::
@@ -1299,6 +1272,7 @@ namespace ESPressio {
                             }
 
                             _deleteTask();
+                            _finalizeStoppedTaskExit();
 
                             return
                                 ThreadInitializationStatus::
@@ -1328,6 +1302,7 @@ namespace ESPressio {
                         }
 
                         _deleteTask();
+                        _finalizeStoppedTaskExit();
 
                         return
                             ThreadInitializationStatus::

@@ -2,6 +2,22 @@
 
 ## 3.1.7 — 2026-08-24
 
+### Critical stability correction
+- Replaced the originally published 3.1.7 task-exit implementation after hardware testing proved that ESPressio Threads occupied FreeRTOS thread-local-storage index 0, which is reserved by ESP-IDF pthread internals.
+- Removed `ESPRESSIO_THREAD_TLS_INDEX` and all use of `vTaskSetThreadLocalStoragePointerAndDelCallback(...)` from ESPressio Threads.
+- ESPressio-created tasks no longer write, reserve, inspect, or depend upon generic FreeRTOS TLS slots.
+- Added an explicit, idempotent ESPressio-owned task-exit finalization path.
+- A normally exiting ESPressio task now reaches `Terminated`, queues the termination dispatcher, and suspends; the dispatcher deletes the underlying FreeRTOS task from a separate context before `OnThreadTaskExited`, `OnTerminated`, shutdown release, or automatic garbage collection can proceed.
+- Initialization-failure and termination-during-initialization paths explicitly delete the still-gated worker and enter the same deferred termination-dispatch contract.
+- Termination dispatch may now wait for queue capacity because dispatch no longer occurs inside a FreeRTOS task-deletion callback.
+- Direct external `vTaskDelete()` of an ESPressio-owned task is now explicitly unsupported. ESPressio task lifetime must be controlled through the ESPressio Threads lifecycle API (`Terminate()`, `Shutdown()`, manager/GC ownership).
+- Added permanent CI guards rejecting future generic FreeRTOS TLS ownership, plus ESP32 compile regression coverage for pthread and WiFi-driver calls from an ESPressio Thread.
+
+### Release replacement policy
+- **The version remains 3.1.7 intentionally.** The originally published 3.1.7 release is considered critically unstable and is wholly invalidated by this correction.
+- Normal semantic-versioning rules are intentionally overridden for this one critical correction: the existing 3.1.7 release/tag is expected to be mutated/reissued to point at the corrected implementation rather than creating a new downstream dependency cascade.
+- This correction changes internal task-exit mechanics and formalizes direct external FreeRTOS task deletion as unsupported. No normal ESPressio `IThread` lifecycle method is removed, but applications that bypassed ESPressio by calling `vTaskDelete()` directly on an ESPressio task must stop doing so.
+
 ### Changed
 - Raised required ESPressio Timing from `>=2.2.7 <3.0.0` to `>=2.2.8 <3.0.0`, propagating the Units 0.2.7 / Serializable 0.11.3 generation downstream.
 - Preserved the required ESPressio Observable baseline at `>=3.0.2 <4.0.0`.
@@ -12,7 +28,8 @@
 
 ### Compatibility
 - Threads retains no direct Serializable dependency; Serializable PrecisionThread representations remain opt-in.
-- No public Threads API or runtime behaviour changes are introduced by this dependency-maintenance release.
+- Ordinary callers using the ESPressio lifecycle API remain source-compatible.
+- The original claim that 3.1.7 introduced no runtime behaviour changes is superseded by the critical correction above.
 
 ### Cascade
 - Continues the release train: `Serializable 0.11.3 -> Units 0.2.7 -> Timing 2.2.8 -> Threads 3.1.7 -> Event 6.0.3 -> downstream integrations`.

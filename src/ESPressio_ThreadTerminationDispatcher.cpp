@@ -173,14 +173,17 @@ namespace Threads {
             SnapshotThread(thread);
 
         /*
-         * Dispatch is called from FreeRTOS task-deletion cleanup, where
-         * waiting for queue capacity is unsafe.
+         * #67 removed invocation from a FreeRTOS task-deletion callback.
+         * Dispatch now runs from normal ESPressio lifecycle contexts, so it
+         * may safely wait for queue capacity. This prevents a terminating
+         * task from being stranded merely because the dispatcher queue is
+         * momentarily full.
          */
         const bool queued =
             xQueueSend(
                 _queue,
                 &record,
-                0
+                portMAX_DELAY
             ) == pdTRUE;
 
         if (queued) {

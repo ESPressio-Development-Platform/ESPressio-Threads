@@ -67,6 +67,14 @@ namespace ESPressio {
         }
 
         void Thread::_dispatchTermination() {
+            /*
+             * Normal task exit leaves the ESPressio-owned task suspended.
+             * The dispatcher is the sole context that deletes that task,
+             * ensuring no Thread object can be reclaimed while its own
+             * FreeRTOS stack is still executing.
+             */
+            _deleteTask();
+
             const bool terminated =
                 GetThreadState() == ThreadState::Terminated;
             const SemaphoreHandle_t taskExited = _taskExited;

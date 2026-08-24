@@ -21,7 +21,9 @@ Timing 2.2.8 carries Units 0.2.7 downstream. Threads itself remains independent 
 
 ESPressio Threads `3.1.7` targets the **ESP32 family under Arduino-ESP32**. This includes classic ESP32 and current single- and multi-core variants such as ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6, ESP32-H2, and ESP32-P4 when supported by the installed Arduino-ESP32/framework version. Single-core devices use CPU 0; multiple hardware cores are not required.
 
-The implementation directly uses ESP-IDF FreeRTOS task, queue, semaphore, and task-local-storage APIs through Arduino-ESP32. The source architecture remains intentionally close to ESP-IDF and the repository retains its CMake/component files, but the `3.1.7` PlatformIO package does **not currently advertise pure ESP-IDF framework support** because the published ESPressio Timing/Units dependency chain does not yet advertise the same framework compatibility.
+The implementation directly uses ESP-IDF FreeRTOS task, queue, and semaphore APIs through Arduino-ESP32. **ESPressio Threads does not reserve, write, inspect, or own generic FreeRTOS thread-local-storage pointer slots.** This is a critical 3.1.7 stability guarantee: ESP-IDF reserves TLS state for framework facilities such as pthread, and ESPressio must not collide with that ownership. The source architecture remains intentionally close to ESP-IDF and the repository retains its CMake/component files, but the `3.1.7` PlatformIO package does **not currently advertise pure ESP-IDF framework support** because the published ESPressio Timing/Units dependency chain does not yet advertise the same framework compatibility.
+
+> **Critical 3.1.7 release replacement:** the originally published 3.1.7 implementation used FreeRTOS TLS index 0 for task-deletion bookkeeping and is invalidated by issue #67. The corrected 3.1.7 removes that mechanism entirely. For this critical correction only, normal semantic-versioning rules are intentionally overridden and the existing 3.1.7 release/tag is expected to be replaced rather than advanced to a new version.
 
 The library is not compatible with ESP8266 or non-ESP32 families such as AVR, SAMD, RP2040, STM32, or Renesas merely because another FreeRTOS port is available there.
 
@@ -319,6 +321,14 @@ queues, tasks, and synchronization resources until device shutdown; they do
 not allocate once per managed Thread and must not be interpreted as recurring
 application leaks.
 
+## Task lifecycle ownership
+
+An ESPressio `Thread` owns the FreeRTOS task it creates. Applications must control that task through the ESPressio lifecycle (`Initialize()`/`Start()`, `Pause()`, `Terminate()`, `Shutdown()`, manager and garbage-collector ownership). Directly calling `vTaskDelete()` on an ESPressio-owned task is unsupported because it bypasses Thread state, callbacks/Observers, shutdown synchronization, termination dispatch, and garbage-collection ownership.
+
+Normal task exit is explicit and TLS-free. After `OnLoop()` finishes (or a requested termination/contained exception causes the loop to finish), the worker reaches `Terminated`, atomically claims task-exit finalization, queues the termination dispatcher, and suspends. The dispatcher deletes the suspended FreeRTOS task from its own task context before delivering the final task-exited callback/Observer milestone or allowing automatic garbage collection. This guarantees that the C++ `Thread` object cannot be destroyed while code is still executing on its own worker stack.
+
+Initialization failure uses the same deferred finalization contract after explicitly deleting the still-gated worker task. Full details are documented in [`docs/THREAD_LIFECYCLE.md`](docs/THREAD_LIFECYCLE.md).
+
 ## Observing Threads
 
 Every `Thread` can notify any number of Observers through ESPressio-Observable.
@@ -339,15 +349,14 @@ needs. All hooks have empty default implementations.
 | `OnThreadTerminationRequested(thread)` | The Thread enters `Terminating` |
 | `OnThreadTerminated(thread)` | The Thread enters `Terminated` |
 | `OnThreadDestroyed(thread)` | Destruction changes the Thread state to `Destroyed` |
-| `OnThreadTaskExited(thread)` | The underlying FreeRTOS task has exited and termination dispatch is running |
+| `OnThreadTaskExited(thread)` | The underlying FreeRTOS task has been deleted and termination dispatch is running |
 | `OnThreadInitializationFailed(thread, status)` | `Initialize()` returns any status other than `Success` |
 | `OnThreadExecutionFailed(thread, cause)` | An exception escapes `OnLoop()` and is wrapped as a `ThreadExecutionException` |
 
 State, initialization, and destruction notifications run synchronously in the
 context which caused them. `OnThreadExecutionFailed()` runs on the failing
 Thread's task. `OnThreadTaskExited()` runs later on the termination-dispatcher
-task and is the appropriate hook when work depends on the worker no longer
-executing `OnLoop()`.
+task, after that dispatcher has deleted the worker FreeRTOS task, and is the appropriate hook when work depends on the worker no longer executing `OnLoop()`.
 
 Observer exceptions are contained independently, so one Observer cannot stop
 delivery to the remaining Observers or interrupt Thread lifecycle processing.
@@ -954,15 +963,15 @@ Directly destroying a running derived object without first calling `Shutdown()` 
 
 Calling `Shutdown()` claims manual ownership of destruction by disabling `FreeOnTerminate`. Consequently, code that explicitly shuts down a dynamically allocated Thread remains responsible for deleting it.
 
-Manual and automatic cleanup now use an atomic ownership claim. If `Shutdown()` begins before manager cleanup claims the object, manual ownership wins and `ThreadManager::CleanUp()` will not delete it. Conversely, once manager cleanup has atomically claimed an object, application code must no longer access that `FreeOnTerminate` instance.
+Manual and automatic cleanup use an atomic ownership claim. If `Shutdown()` begins before manager cleanup claims the object, manual ownership wins and `ThreadManager::CleanUp()` will not delete it. Conversely, once manager cleanup has atomically claimed an object, application code must no longer access that `FreeOnTerminate` instance.
 
-`Shutdown()` also waits for queued termination-dispatch work after the worker task has exited. When it returns, neither the worker nor the termination dispatcher will access the object, so derived members may be destroyed safely. Calling `Shutdown()` from `OnTerminated` itself does not wait on the dispatcher task and therefore does not deadlock; the callback must still not delete its sender.
+`Shutdown()` waits for termination dispatch. When it returns, the dispatcher has deleted the worker FreeRTOS task and completed its final access to the object, so derived members may be destroyed safely. Calling `Shutdown()` from `OnTerminated` itself does not wait on the dispatcher task and therefore does not deadlock; the callback must still not delete its sender.
 
-Termination has two callback milestones. `SetOnTerminate()` registers a callback for the moment the Thread loop enters the `Terminated` state. `SetOnTerminated()` runs later on the dedicated termination-dispatcher task, after FreeRTOS task execution has ended. Use `SetOnTerminated()` when cleanup depends on the worker no longer executing `OnLoop()`. The dispatcher keeps TLS cleanup short and permits ordinary callback work without blocking the FreeRTOS cleanup context.
+Termination has two callback milestones. `SetOnTerminate()` registers a callback for the logical transition into the `Terminated` state. `SetOnTerminated()` runs later on the dedicated termination-dispatcher task, after that dispatcher has deleted the underlying FreeRTOS worker. Use `SetOnTerminated()` when cleanup depends on the worker no longer executing `OnLoop()`.
 
 The termination dispatcher is initialized once, when first required. If its queue or task cannot be created, it remains unavailable for the lifetime of the application and `Initialize()` reports `TerminationDispatcherUnavailable`. Unlike the garbage collector, the dispatcher does not retry initialization; applications should treat this status as a startup resource/configuration failure.
 
-Enqueueing termination work from FreeRTOS task-deletion cleanup is non-blocking. The default dispatcher queue can hold one pending event for every supported Thread. If a smaller configured queue is exhausted, `OnTerminated` is not invoked for that termination, shutdown waiters are still released, and a `FreeOnTerminate` object remains registered until a later explicit `ThreadManager::CleanUp()` call.
+Termination dispatch no longer originates from a FreeRTOS task-deletion callback. Queue submission therefore waits for capacity rather than dropping a task-exit record when the queue is temporarily full. This is safe because dispatch now occurs from normal ESPressio lifecycle code rather than a FreeRTOS deletion-cleanup context.
 
 An `OnTerminated` callback must not directly delete its sender. It may change `FreeOnTerminate`; the dispatcher evaluates that setting after the callback and manager cleanup must subsequently win the atomic automatic-cleanup claim before deletion can occur.
 
