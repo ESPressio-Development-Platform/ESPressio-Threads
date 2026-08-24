@@ -1,0 +1,150 @@
+name: Critical TLS / Task Exit Regression
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tls-ownership-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject FreeRTOS TLS ownership in ESPressio Threads
+        shell: bash
+        run: |
+          if grep -R -n -E 'ESPRESSIO_THREAD_TLS_INDEX|vTaskSetThreadLocalStoragePointer|pvTaskGetThreadLocalStoragePointer' src; then
+            echo 'ESPressio Threads must not own generic FreeRTOS TLS slots (#67).' >&2
+            exit 1
+          fi
+
+  esp32-pthread-coexistence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: project/ESPressio-Threads
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Timing
+          ref: 2.2.8
+          path: project/dependencies/ESPressio-Timing
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Units
+          ref: 0.2.7
+          path: project/dependencies/ESPressio-Units
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Observable
+          ref: 3.0.2
+          path: project/dependencies/ESPressio-Observable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: pip install platformio
+      - name: Create pthread coexistence consumer
+        shell: bash
+        run: |
+          mkdir -p project/compile/src
+          cat > project/compile/platformio.ini <<'EOF'
+          [env:esp32]
+          platform = espressif32
+          board = esp32dev
+          framework = arduino
+          build_flags = -std=gnu++17 -frtti
+          build_unflags = -std=gnu++11 -fno-rtti
+          lib_ldf_mode = deep+
+          lib_deps =
+              ../dependencies/ESPressio-Observable
+              ../dependencies/ESPressio-Units
+              ../dependencies/ESPressio-Timing
+              ../ESPressio-Threads
+          EOF
+          cat > project/compile/src/main.cpp <<'EOF'
+          #include <Arduino.h>
+          #include <pthread.h>
+          #include <ESPressio_Thread.hpp>
+          #include <ESPressio_ThreadManager.hpp>
+
+          class PThreadCoexistenceThread final : public ESPressio::Threads::Thread {
+          protected:
+              void OnLoop() override {
+                  pthread_key_t key{};
+                  if (pthread_key_create(&key, nullptr) == 0) {
+                      static int sentinel = 67;
+                      (void)pthread_setspecific(key, &sentinel);
+                      volatile void* observed = pthread_getspecific(key);
+                      (void)observed;
+                      (void)pthread_key_delete(key);
+                  }
+                  Terminate();
+              }
+          };
+
+          PThreadCoexistenceThread worker;
+
+          void setup() {
+              ESPressio::Threads::ThreadManager::GetInstance()->Initialize();
+              worker.Initialize();
+          }
+          void loop() { delay(1000); }
+          EOF
+      - name: Compile pthread use inside ESPressio Thread
+        run: pio run -d project/compile
+
+  esp32-wifi-thread-coexistence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: project/ESPressio-Threads
+      - uses: actions/checkout@v4
+        with: {repository: ESPressio-Development-Platform/ESPressio-Timing, ref: 2.2.8, path: project/dependencies/ESPressio-Timing}
+      - uses: actions/checkout@v4
+        with: {repository: ESPressio-Development-Platform/ESPressio-Units, ref: 0.2.7, path: project/dependencies/ESPressio-Units}
+      - uses: actions/checkout@v4
+        with: {repository: ESPressio-Development-Platform/ESPressio-Observable, ref: 3.0.2, path: project/dependencies/ESPressio-Observable}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.x'}
+      - run: pip install platformio
+      - name: Create WiFi-driver consumer
+        shell: bash
+        run: |
+          mkdir -p project/compile/src
+          cat > project/compile/platformio.ini <<'EOF'
+          [env:esp32]
+          platform = espressif32
+          board = esp32dev
+          framework = arduino
+          build_flags = -std=gnu++17 -frtti
+          build_unflags = -std=gnu++11 -fno-rtti
+          lib_ldf_mode = deep+
+          lib_deps =
+              ../dependencies/ESPressio-Observable
+              ../dependencies/ESPressio-Units
+              ../dependencies/ESPressio-Timing
+              ../ESPressio-Threads
+          EOF
+          cat > project/compile/src/main.cpp <<'EOF'
+          #include <Arduino.h>
+          #include <WiFi.h>
+          #include <ESPressio_Thread.hpp>
+          #include <ESPressio_ThreadManager.hpp>
+
+          class WiFiDriverThread final : public ESPressio::Threads::Thread {
+          protected:
+              void OnLoop() override {
+                  (void)::WiFi.softAPgetStationNum();
+                  Terminate();
+              }
+          };
+
+          WiFiDriverThread worker;
+          void setup() {
+              ESPressio::Threads::ThreadManager::GetInstance()->Initialize();
+              worker.Initialize();
+          }
+          void loop() { delay(1000); }
+          EOF
+      - name: Compile ESP-IDF WiFi API use inside ESPressio Thread
+        run: pio run -d project/compile
