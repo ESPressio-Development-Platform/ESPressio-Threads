@@ -71,7 +71,42 @@ The active Event, WiFi and ESP-Now working branches now resolve ESPressio Thread
 
 A high-gain candidate remains: `Thread` currently carries separate `ReadWriteMutex` wrappers for `freeOnTerminate`, `startOnInitialize`, stack size, priority and core ID in addition to an existing `_taskConfigurationMutex`. Each wrapper contains a `std::shared_mutex` plus callback/comparison `std::function` state. Consolidating these is expected to produce meaningful per-Thread savings.
 
-This has deliberately not been bundled into the first tranche because `_initialize()` currently holds `_taskConfigurationMutex` while calling the public configuration getters. A safe implementation therefore requires an explicit configuration snapshot/atomic design plus race/reentrancy tests; simply adding getter locking would deadlock. It will be addressed as a separate #69 change after this corrected hardware checkpoint.
+This has deliberately not been bundled into the first tranche because `_initialize()` currently holds `_taskConfigurationMutex` while calling the public configuration getters. A safe implementation therefore requires an explicit configuration snapshot/atomic design plus race/reentrancy tests; simply adding getter locking would deadlock.
 
 ### Validation note
 The earlier CI checkpoint was green but did not exercise the Observable notification ownership path that failed on device. Hardware validation therefore caught a real coverage gap. Future acceptance of ownership-related optimisations requires a test that actually invokes notifications under the proposed ownership model.
+
+## 2026-08-25 — Lazy ThreadSafe callback/comparator storage (#69)
+
+`Mutex<T>` and `ReadWriteMutex<T>` previously embedded two `std::function` members in every instance: an on-change callback and comparator. Most ESPressio scalar wrappers use neither custom facility, yet every instance permanently paid the object-size cost.
+
+The callback/comparator pair is now held in lazily allocated `ThreadSafeCallbacks<T>` storage only when a caller supplies at least one custom function. The normal case compares with `operator==` directly and retains only a nullable `unique_ptr` in addition to the value and lock.
+
+### Behavior preserved
+- `Get`/`TryGet`, read/write locking and shared-reader semantics are unchanged;
+- arbitrary custom comparators and on-change callbacks remain supported;
+- callbacks are still copied under the lock and invoked after the lock is released;
+- try-lock operations retain their existing failure semantics.
+
+This is deliberately a first stage toward per-Thread scalar consolidation because it reduces every default wrapper system-wide without changing `Thread`'s configuration-lock ordering.
+
+Commit: `d2a6198c7fc763ea9a7ca80d3a0b841c59ee88ae`.
+
+## 2026-08-25 — Lazy termination/garbage-collection infrastructure (#71)
+
+Hardware validation showed the full WiFi + ESP-NOW Lab reaching Ready with effectively no allocatable internal DRAM while the termination dispatcher and garbage collector had already reserved worker stacks and FreeRTOS infrastructure despite no termination or cleanup work having occurred.
+
+### Changes
+- `ThreadTerminationDispatcher` now leaves its queue/task unallocated at singleton construction and creates them atomically on the first real `Dispatch()` request.
+- `ThreadGarbageCollector` likewise leaves its binary semaphore/task unallocated until the first `CleanUp()` request.
+- availability inspection does not force allocation;
+- observers receive initialization success/failure when physical infrastructure is actually attempted rather than when a dormant singleton is first referenced;
+- blocking termination-queue backpressure, dispatcher-owned task deletion, GC request coalescing and synchronous GC fallback remain intact.
+
+### Expected steady-state saving
+Applications that create Threads but do not terminate/free them during ordinary steady operation avoid two 2000-byte infrastructure stack reservations plus the dispatcher queue, GC semaphore and associated FreeRTOS task-control overhead until those facilities are actually required.
+
+Commits: `da7f91f7efa10f3d68633d74056a3a5e3594c3a3`, `09239db43afb8956893010dd1d56aff834e42dd9`, `995cba867a01aecb17818d0f57014e2928a070ed`.
+
+### Remaining Threads work
+The five per-Thread scalar wrappers remain candidates for a later explicit configuration-snapshot redesign. Generic task-stack defaults are not being reduced blindly; subsequent reductions must use task-specific hardware high-water evidence with a retained safety reserve.
