@@ -12,6 +12,14 @@ jobs:
       - name: Guard migrated worker ownership
         shell: bash
         run: |
+          grep -q '<ESPressio_Task.hpp>' src/ESPressio_Thread.hpp
+          grep -q 'Task::TaskRuntime::Create' src/ESPressio_Thread.hpp
+          grep -q 'Task::TaskRuntime::Delete' src/ESPressio_Thread.hpp
+          grep -q 'Task::TaskRuntime::Current' src/ESPressio_Thread.hpp
+          grep -q 'Task::TaskRuntime::Suspend' src/ESPressio_Thread.hpp
+          grep -q 'ulTaskNotifyTake' src/ESPressio_Thread.hpp
+          grep -q 'xTaskNotifyGive' src/ESPressio_Thread.hpp
+
           grep -q '<ESPressio_Task.hpp>' src/ESPressio_ThreadTerminationDispatcher.cpp
           grep -q 'Task::TaskRuntime::Create' src/ESPressio_ThreadTerminationDispatcher.cpp
           grep -q 'Task::TaskRuntime::Delete' src/ESPressio_ThreadTerminationDispatcher.cpp
@@ -21,6 +29,10 @@ jobs:
           grep -q 'Task::TaskRuntime::Create' src/ESPressio_ThreadGarbageCollector.hpp
           grep -q 'Task::TaskRuntime::Delete' src/ESPressio_ThreadGarbageCollector.hpp
 
+          if grep -E 'xTaskCreate(PinnedToCore)?|vTaskDelete|xTaskGetCurrentTaskHandle|vTaskSuspend' src/ESPressio_Thread.hpp; then
+            echo 'Primary Thread regressed to direct FreeRTOS task ownership.' >&2
+            exit 1
+          fi
           if grep -E 'xTaskCreate(PinnedToCore)?|vTaskDelete' src/ESPressio_ThreadTerminationDispatcher.cpp; then
             echo 'Termination dispatcher regressed to direct FreeRTOS task ownership.' >&2
             exit 1
@@ -109,6 +121,8 @@ jobs:
               ThreadManager::GetInstance()->Initialize();
               (void)ThreadTerminationDispatcher::GetInstance()->EnsureAvailable();
               (void)probe.Initialize();
+              probe.Start();
+              probe.Pause();
               probe.Start();
               probe.Terminate();
           }
