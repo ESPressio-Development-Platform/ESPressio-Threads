@@ -97,16 +97,44 @@ Commit: `d2a6198c7fc763ea9a7ca80d3a0b841c59ee88ae`.
 Hardware validation showed the full WiFi + ESP-NOW Lab reaching Ready with effectively no allocatable internal DRAM while the termination dispatcher and garbage collector had already reserved worker stacks and FreeRTOS infrastructure despite no termination or cleanup work having occurred.
 
 ### Changes
-- `ThreadTerminationDispatcher` now leaves its queue/task unallocated at singleton construction and creates them atomically on the first real `Dispatch()` request.
+- `ThreadTerminationDispatcher` leaves its queue/task unallocated at singleton construction and creates them on demand.
 - `ThreadGarbageCollector` likewise leaves its binary semaphore/task unallocated until the first `CleanUp()` request.
-- availability inspection does not force allocation;
-- observers receive initialization success/failure when physical infrastructure is actually attempted rather than when a dormant singleton is first referenced;
+- availability inspection does not itself force allocation;
+- observers receive initialization success/failure when physical infrastructure is actually attempted;
 - blocking termination-queue backpressure, dispatcher-owned task deletion, GC request coalescing and synchronous GC fallback remain intact.
 
 ### Expected steady-state saving
-Applications that create Threads but do not terminate/free them during ordinary steady operation avoid two 2000-byte infrastructure stack reservations plus the dispatcher queue, GC semaphore and associated FreeRTOS task-control overhead until those facilities are actually required.
+Where lifecycle semantics permit infrastructure to remain dormant, applications avoid the corresponding 2000-byte infrastructure stack reservation plus queue/semaphore and FreeRTOS task-control overhead until required.
 
-Commits: `da7f91f7efa10f3d68633d74056a3a5e3594c3a3`, `09239db43afb8956893010dd1d56aff834e42dd9`, `995cba867a01aecb17818d0f57014e2928a070ed`.
+Original commits: `da7f91f7efa10f3d68633d74056a3a5e3594c3a3`, `09239db43afb8956893010dd1d56aff834e42dd9`, `995cba867a01aecb17818d0f57014e2928a070ed`.
+
+## 2026-08-25 — Hardware correction: Thread initialization requires termination infrastructure (#71)
+
+StickB hardware validation showed `EventTransportManager early initialization status=4`. `ThreadInitializationStatus` value 4 is `TerminationDispatcherUnavailable`: `Thread::Initialize()` requires working termination-dispatch infrastructure before a normal ESPressio task may start. The original lazy implementation only created the dispatcher from `Dispatch()`, making startup correctness depend on incidental initialization order.
+
+### Correction
+`ThreadTerminationDispatcher::EnsureAvailable()` now demand-initializes the infrastructure, and `Thread::_isTerminationDispatcherAvailable()` uses that method during Thread initialization. This preserves the Thread lifecycle invariant while still avoiding eager singleton-constructor allocation before the first actual Thread needs the service.
+
+Corrective commits: `2bdeed022bf98eea0ba70d62557d2d610ebcee08`, `0e65d68de8381ac740a26d0d5f6ef44ec6e90cca`, `a645ef8dba073bc73fde9ab7d135cb973506ecf6`.
+
+### Revised optimisation conclusion
+Under the present Thread lifecycle design, the termination dispatcher cannot remain unallocated once the first normal ESPressio Thread starts. It is therefore not counted as a steady-state saving. Garbage collection remains independently demand-driven.
+
+## 2026-08-25 — Hardware correction: publish termination queue before task creation (#71)
+
+The first `EnsureAvailable()` hardware build exposed a second, cross-core initialization race. StickB immediately rebooted with FreeRTOS assertion `xQueueReceive queue.c:1531 (( pxQueue ))`. Exact ELF/MAP resolution placed the failing frames in `ThreadTerminationDispatcher::_loop()` and `_taskEntry()`.
+
+### Root cause
+`_initialize()` created the queue into a local variable, then called `xTaskCreate()`, and only after `xTaskCreate()` returned assigned `_queue = queue`. On a dual-core ESP32 the newly-created dispatcher task may become runnable immediately on the other core. It could therefore enter `_loop()` and execute `xQueueReceive(_queue, ...)` while the member was still null.
+
+### Correction
+- publish `_queue` while holding `_initializationMutex` before calling `xTaskCreate()`;
+- `IsAvailable()` still requires both `_queue` and `_taskHandle`, so lifecycle callers cannot observe the half-created dispatcher while the mutex is held;
+- if task creation fails, reset `_queue` to null and delete the temporary queue before reporting initialization failure.
+
+This preserves demand initialization while making startup ordering safe across cores.
+
+Corrective commit: `78b3085e9a353b35b4bc17e39c19e535cc373109`.
 
 ### Remaining Threads work
 The five per-Thread scalar wrappers remain candidates for a later explicit configuration-snapshot redesign. Generic task-stack defaults are not being reduced blindly; subsequent reductions must use task-specific hardware high-water evidence with a retained safety reserve.
