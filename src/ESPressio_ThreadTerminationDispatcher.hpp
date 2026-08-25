@@ -164,6 +164,7 @@ namespace Threads {
 
 
         bool IsAvailable() const;
+        bool EnsureAvailable();
         bool IsCurrentTask() const;
         bool Dispatch(Thread* thread);
 
