@@ -56,7 +56,7 @@ namespace ESPressio {
         }
 
         bool Thread::_isTerminationDispatcherAvailable() {
-            return ThreadTerminationDispatcher::GetInstance()->IsAvailable();
+            return ThreadTerminationDispatcher::GetInstance()->EnsureAvailable();
         }
 
         bool Thread::_isCurrentTerminationDispatcherTask() {
