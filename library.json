@@ -18,6 +18,10 @@
     "platforms": ["espressif32"],
     "dependencies": [
         {
+            "name": "ESPressio-Task",
+            "url": "https://github.com/ESPressio-Development-Platform/ESPressio-Task.git#feature/1-task-execution"
+        },
+        {
             "name": "ESPressio-Timing",
             "version": ">=2.2.8 <3.0.0",
             "url": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git"
