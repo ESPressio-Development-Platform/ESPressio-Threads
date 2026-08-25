@@ -25,9 +25,18 @@ jobs:
           grep -q 'Task::TaskRuntime::Delete' src/ESPressio_ThreadTerminationDispatcher.cpp
           grep -q 'Task::TaskRuntime::Current' src/ESPressio_ThreadTerminationDispatcher.cpp
 
-          grep -q '<ESPressio_Task.hpp>' src/ESPressio_ThreadGarbageCollector.hpp
-          grep -q 'Task::TaskRuntime::Create' src/ESPressio_ThreadGarbageCollector.hpp
-          grep -q 'Task::TaskRuntime::Delete' src/ESPressio_ThreadGarbageCollector.hpp
+          # Automatic ReleaseOnTerminate reclamation now belongs to the
+          # existing termination dispatcher + ThreadManager path. A separate
+          # garbage-collector task must not return.
+          grep -q 'ThreadManager::GetInstance()->CleanUpWithResult' src/ESPressio_ThreadTerminationDispatcher.cpp
+          if find src -maxdepth 1 -type f -name '*GarbageCollector*' | grep -q .; then
+            echo 'Dedicated Thread garbage collector API/task was reintroduced.' >&2
+            exit 1
+          fi
+          if grep -R 'threadGarbageCollector\|ThreadGarbageCollector::GetInstance' src examples docs README.md; then
+            echo 'Dedicated garbage collector references remain in the public surface.' >&2
+            exit 1
+          fi
 
           if grep -E 'xTaskCreate(PinnedToCore)?|vTaskDelete|xTaskGetCurrentTaskHandle|vTaskSuspend' src/ESPressio_Thread.hpp; then
             echo 'Primary Thread regressed to direct FreeRTOS task ownership.' >&2
@@ -35,10 +44,6 @@ jobs:
           fi
           if grep -E 'xTaskCreate(PinnedToCore)?|vTaskDelete' src/ESPressio_ThreadTerminationDispatcher.cpp; then
             echo 'Termination dispatcher regressed to direct FreeRTOS task ownership.' >&2
-            exit 1
-          fi
-          if grep -E 'xTaskCreate(PinnedToCore)?|vTaskDelete' src/ESPressio_ThreadGarbageCollector.hpp; then
-            echo 'Garbage collector regressed to direct FreeRTOS task ownership.' >&2
             exit 1
           fi
 
@@ -105,7 +110,6 @@ jobs:
           #include <ESPressio_Thread.hpp>
           #include <ESPressio_ThreadManager.hpp>
           #include <ESPressio_ThreadTerminationDispatcher.hpp>
-          #include <ESPressio_ThreadGarbageCollector.hpp>
 
           using namespace ESPressio::Threads;
 
@@ -113,7 +117,8 @@ jobs:
           protected:
               void OnLoop() override { delay(1); }
           public:
-              ProbeThread() : Thread(ThreadReleasePolicy::ExplicitRelease) {
+              explicit ProbeThread(ThreadReleasePolicy policy = ThreadReleasePolicy::ExplicitRelease)
+                  : Thread(policy) {
                   SetStartOnInitialize(false);
               }
           } probe;
@@ -126,6 +131,13 @@ jobs:
               probe.Pause();
               probe.Start();
               probe.Terminate();
+
+              // Compile the automatic-release construction path as part of the
+              // same coordinated Task-backed lifecycle surface.
+              auto* automatic = new ProbeThread(ThreadReleasePolicy::ReleaseOnTerminate);
+              (void)automatic->Initialize();
+              automatic->Start();
+              automatic->Terminate();
           }
 
           void loop() { delay(1000); }
