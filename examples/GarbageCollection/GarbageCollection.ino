@@ -28,6 +28,13 @@ class DemoThread : public Thread {
                 Terminate();
             }
         }
+
+    public:
+        explicit DemoThread(
+            ThreadReleasePolicy releasePolicy =
+                ThreadReleasePolicy::ExplicitRelease
+        ) : Thread(releasePolicy) {
+        }
 };
 
 DemoThread* thread = nullptr;
@@ -44,7 +51,9 @@ void onThreadDestroyed(
 void setup() {
     Serial.begin(115200);
 
-    thread = new DemoThread(true);
+    thread = new DemoThread(
+        ThreadReleasePolicy::ReleaseOnTerminate
+    );
 
     thread->SetStartOnInitialize(
         true
