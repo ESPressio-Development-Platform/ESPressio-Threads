@@ -1,0 +1,119 @@
+name: Task Runtime Backend Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  task-runtime-boundaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Guard migrated worker ownership
+        shell: bash
+        run: |
+          grep -q '<ESPressio_Task.hpp>' src/ESPressio_ThreadTerminationDispatcher.cpp
+          grep -q 'Task::TaskRuntime::Create' src/ESPressio_ThreadTerminationDispatcher.cpp
+          grep -q 'Task::TaskRuntime::Delete' src/ESPressio_ThreadTerminationDispatcher.cpp
+          grep -q 'Task::TaskRuntime::Current' src/ESPressio_ThreadTerminationDispatcher.cpp
+
+          grep -q '<ESPressio_Task.hpp>' src/ESPressio_ThreadGarbageCollector.hpp
+          grep -q 'Task::TaskRuntime::Create' src/ESPressio_ThreadGarbageCollector.hpp
+          grep -q 'Task::TaskRuntime::Delete' src/ESPressio_ThreadGarbageCollector.hpp
+
+          if grep -E 'xTaskCreate(PinnedToCore)?|vTaskDelete' src/ESPressio_ThreadTerminationDispatcher.cpp; then
+            echo 'Termination dispatcher regressed to direct FreeRTOS task ownership.' >&2
+            exit 1
+          fi
+          if grep -E 'xTaskCreate(PinnedToCore)?|vTaskDelete' src/ESPressio_ThreadGarbageCollector.hpp; then
+            echo 'Garbage collector regressed to direct FreeRTOS task ownership.' >&2
+            exit 1
+          fi
+
+          grep -q 'ESPressio-Task' library.json
+          grep -q 'feature/1-task-execution' library.json
+
+  esp32-task-runtime-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: project/ESPressio-Threads
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Task
+          ref: feature/1-task-execution
+          path: project/dependencies/ESPressio-Task
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Observable
+          ref: 3.0.2
+          path: project/dependencies/ESPressio-Observable
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Timing
+          ref: 2.2.8
+          path: project/dependencies/ESPressio-Timing
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Units
+          ref: 0.2.7
+          path: project/dependencies/ESPressio-Units
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Serializable
+          ref: 0.11.3
+          path: project/dependencies/ESPressio-Serializable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: pip install platformio
+      - name: Create lifecycle compile project
+        shell: bash
+        run: |
+          mkdir -p project/compile/src
+          cat > project/compile/platformio.ini <<'EOF'
+          [env:esp32]
+          platform = espressif32
+          board = esp32dev
+          framework = arduino
+          build_flags = -std=gnu++17 -frtti
+          build_unflags = -std=gnu++11 -fno-rtti
+          lib_ldf_mode = deep+
+          lib_deps =
+              ../dependencies/ESPressio-Observable
+              ../dependencies/ESPressio-Serializable
+              ../dependencies/ESPressio-Units
+              ../dependencies/ESPressio-Timing
+              ../dependencies/ESPressio-Task
+              ../ESPressio-Threads
+          EOF
+          cat > project/compile/src/main.cpp <<'EOF'
+          #include <Arduino.h>
+          #include <ESPressio_Threads.hpp>
+          #include <ESPressio_ThreadTerminationDispatcher.hpp>
+          #include <ESPressio_ThreadGarbageCollector.hpp>
+
+          using namespace ESPressio::Threads;
+
+          class ProbeThread final : public Thread {
+          protected:
+              void OnLoop() override { delay(1); }
+          public:
+              ProbeThread() : Thread(ThreadReleasePolicy::ExplicitRelease) {
+                  SetStartOnInitialize(false);
+              }
+          } probe;
+
+          void setup() {
+              ThreadManager::GetInstance()->Initialize();
+              (void)ThreadTerminationDispatcher::GetInstance()->EnsureAvailable();
+              (void)probe.Initialize();
+              probe.Start();
+              probe.Terminate();
+          }
+
+          void loop() { delay(1000); }
+          EOF
+      - name: Compile Task-backed Threads infrastructure
+        run: pio run -d project/compile
