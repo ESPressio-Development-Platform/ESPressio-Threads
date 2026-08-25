@@ -4,6 +4,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <ESPressio_IObservable.hpp>
@@ -166,6 +167,7 @@ namespace Threads {
         bool IsAvailable() const;
         bool EnsureAvailable();
         bool IsCurrentTask() const;
+        uint32_t GetMinimumFreeStackBytes() const;
         bool Dispatch(Thread* thread);
 
 
