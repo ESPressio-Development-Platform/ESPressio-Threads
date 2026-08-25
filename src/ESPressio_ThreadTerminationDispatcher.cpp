@@ -1,5 +1,6 @@
 #include "ESPressio_ThreadTerminationDispatcher.hpp"
 #include "ESPressio_Thread.hpp"
+#include "ESPressio_ThreadManager.hpp"
 #include <ESPressio_Task.hpp>
 
 namespace ESPressio {
@@ -109,9 +110,28 @@ namespace Threads {
             record.ThreadPointer->_dispatchTermination();
 
             /*
-             * Do not dereference the Thread after termination dispatch:
-             * automatic GC can now own its eventual destruction.
+             * _dispatchTermination() has now deleted the native task and
+             * completed all callbacks that may legally dereference the Thread.
+             * From this point forward only the value snapshot is safe: manager
+             * cleanup may delete ReleaseOnTerminate objects immediately.
+             *
+             * ThreadManager already owns the difficult reclamation semantics.
+             * If a manager iteration is active it marks cleanup pending and
+             * the final IterationGuard performs deletion later; otherwise it
+             * atomically claims, unregisters and deletes eligible Threads here.
              */
+            if (record.Snapshot.FreeOnTerminate) {
+                try {
+                    ThreadManager::GetInstance()->CleanUpWithResult();
+                } catch (...) {
+                    /*
+                     * Reclamation failure must never terminate this permanent
+                     * infrastructure task. The object remains manager-owned and
+                     * is eligible for a later cleanup pass.
+                     */
+                }
+            }
+
             _observable->Completed(record.Snapshot);
         }
     }
