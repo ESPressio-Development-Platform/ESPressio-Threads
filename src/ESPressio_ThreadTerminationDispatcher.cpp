@@ -45,6 +45,20 @@ namespace Threads {
             return false;
         }
 
+        /*
+         * Publish the queue before creating the worker task. On a dual-core
+         * ESP32, xTaskCreate() may make the new task runnable immediately on
+         * the other core before this function returns. Publishing _queue only
+         * after xTaskCreate() therefore allows _loop() to enter
+         * xQueueReceive(nullptr, ...).
+         *
+         * _initializationMutex prevents another lifecycle caller from
+         * observing this partially-created state. The dispatcher worker only
+         * needs _queue during startup, so publishing it here closes that race
+         * without exposing a usable dispatcher through IsAvailable().
+         */
+        _queue = queue;
+
         TaskHandle_t taskHandle = nullptr;
         const BaseType_t result = xTaskCreate(
             _taskEntry,
@@ -56,12 +70,12 @@ namespace Threads {
         );
 
         if (result != pdPASS) {
+            _queue = nullptr;
             vQueueDelete(queue);
             _observable->Initialized(false);
             return false;
         }
 
-        _queue = queue;
         _taskHandle = taskHandle;
         _observable->Initialized(true);
         return true;
