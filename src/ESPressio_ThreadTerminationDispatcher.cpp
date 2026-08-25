@@ -167,6 +167,15 @@ namespace Threads {
     }
 
 
+    uint32_t ThreadTerminationDispatcher::GetMinimumFreeStackBytes() const {
+        std::lock_guard<std::mutex> lock(_initializationMutex);
+        if (_taskHandle == nullptr) {
+            return 0;
+        }
+        return Task::TaskRuntime::MinimumFreeStack(_taskHandle);
+    }
+
+
     bool ThreadTerminationDispatcher::Dispatch(Thread* thread) {
         if (thread == nullptr) {
             return false;
