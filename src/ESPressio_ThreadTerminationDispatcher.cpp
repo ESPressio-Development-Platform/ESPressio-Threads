@@ -115,21 +115,25 @@ namespace Threads {
              * From this point forward only the value snapshot is safe: manager
              * cleanup may delete ReleaseOnTerminate objects immediately.
              *
+             * Always ask ThreadManager to perform a cleanup pass here rather
+             * than consulting record.Snapshot.FreeOnTerminate. OnTerminated is
+             * intentionally allowed to change FreeOnTerminate, so eligibility
+             * must be resolved from the post-callback object state by
+             * ThreadManager::TryClaimAutomaticCleanup().
+             *
              * ThreadManager already owns the difficult reclamation semantics.
              * If a manager iteration is active it marks cleanup pending and
              * the final IterationGuard performs deletion later; otherwise it
              * atomically claims, unregisters and deletes eligible Threads here.
              */
-            if (record.Snapshot.FreeOnTerminate) {
-                try {
-                    ThreadManager::GetInstance()->CleanUpWithResult();
-                } catch (...) {
-                    /*
-                     * Reclamation failure must never terminate this permanent
-                     * infrastructure task. The object remains manager-owned and
-                     * is eligible for a later cleanup pass.
-                     */
-                }
+            try {
+                ThreadManager::GetInstance()->CleanUpWithResult();
+            } catch (...) {
+                /*
+                 * Reclamation failure must never terminate this permanent
+                 * infrastructure task. Eligible objects remain manager-owned
+                 * and can be reclaimed by a later cleanup pass.
+                 */
             }
 
             _observable->Completed(record.Snapshot);
