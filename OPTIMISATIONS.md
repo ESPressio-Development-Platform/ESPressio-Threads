@@ -138,3 +138,26 @@ Corrective commit: `78b3085e9a353b35b4bc17e39c19e535cc373109`.
 
 ### Remaining Threads work
 The five per-Thread scalar wrappers remain candidates for a later explicit configuration-snapshot redesign. Generic task-stack defaults are not being reduced blindly; subsequent reductions must use task-specific hardware high-water evidence with a retained safety reserve.
+
+## 2026-08-25 — ESPressio Task backend migration (#72)
+
+The new ESPressio Task library now owns the low-level FreeRTOS task-execution primitive. Threads remains the higher-level lifecycle-managed persistent-worker abstraction.
+
+### Completed migration
+- `ThreadTerminationDispatcher` creates its worker through `Task::TaskRuntime::Create()`, uses `TaskRuntime::Current()` for ownership checks and exits through `TaskRuntime::Delete()`.
+- `ThreadGarbageCollector` creates and exits its worker through the same Task runtime abstraction.
+- Both migrations preserve the existing lazy allocation, queue/semaphore backpressure, cross-core publication ordering and lifecycle/observer contracts.
+- `library.json` resolves ESPressio Task directly from `feature/1-task-execution` during this coordinated development round.
+- Added CI guards which reject direct `xTaskCreate*`/`vTaskDelete` ownership returning to the migrated infrastructure workers, plus an ESP32 integration compile against the Task working branch.
+
+### Deliberately unchanged
+FreeRTOS queues, semaphores, task notifications and delay/yield primitives remain in Threads where they define Thread lifecycle/scheduling semantics. #72 is an ownership/backend migration, not a rewrite of the Thread state machine onto a generic executor.
+
+### Remaining #72 work
+The primary `Thread` task itself still uses direct FreeRTOS create/delete/current/suspend operations. That conversion is the remaining task-ownership site and must preserve its start-gate notification, initialization race handling, dispatcher-owned deletion and current-task termination semantics. It will be migrated separately rather than folded into the already-validated infrastructure-worker change.
+
+### Commits
+- `3bddd28` — `refactor(#72): create termination worker through ESPressio Task runtime`
+- `32fa75e` — `refactor(#72): create garbage collector worker through ESPressio Task runtime`
+- `c021d75` / `fe44756` — working-branch Task dependency metadata
+- `51c05ec` — `test(#72): guard ESPressio Task ownership of infrastructure workers`
