@@ -121,6 +121,11 @@ namespace Threads {
     }
 
 
+    bool ThreadTerminationDispatcher::EnsureAvailable() {
+        return _initialize();
+    }
+
+
     bool ThreadTerminationDispatcher::IsCurrentTask() const {
         std::lock_guard<std::mutex> lock(_initializationMutex);
         return
@@ -134,7 +139,7 @@ namespace Threads {
             return false;
         }
 
-        if (!_initialize()) {
+        if (!EnsureAvailable()) {
             return false;
         }
 
