@@ -8,6 +8,8 @@
 #include <memory>
 #include <mutex>
 
+#include <ESPressio_Task.hpp>
+
 #include "ESPressio_ThreadManager.hpp"
 #include "ESPressio_IThreadGarbageCollector.hpp"
 #include "ESPressio_ThreadSafeObservable.hpp"
@@ -105,30 +107,39 @@ namespace Threads {
                 return false;
             }
 
-            TaskHandle_t taskHandle = nullptr;
-            const BaseType_t result = xTaskCreate(
+            /*
+             * Publish the semaphore before creating the worker. A newly
+             * created FreeRTOS task may execute immediately on the other core.
+             * Keeping _initializationMutex held means other callers still
+             * cannot observe this as fully available until _taskHandle exists.
+             */
+            _semaphore = semaphore;
+
+            Task::TaskConfiguration configuration;
+            configuration.Name = "threadGarbageCollector";
+            configuration.StackSize = ESPRESSIO_THREAD_GARBAGE_COLLECTOR_STACK_SIZE;
+            configuration.Priority = ESPRESSIO_THREAD_GARBAGE_COLLECTOR_PRIORITY;
+
+            const auto creation = Task::TaskRuntime::Create(
                 _taskEntry,
-                "threadGarbageCollector",
-                ESPRESSIO_THREAD_GARBAGE_COLLECTOR_STACK_SIZE,
                 this,
-                ESPRESSIO_THREAD_GARBAGE_COLLECTOR_PRIORITY,
-                &taskHandle
+                configuration
             );
 
-            if (result != pdPASS) {
+            if (!creation) {
+                _semaphore = nullptr;
                 vSemaphoreDelete(semaphore);
                 return false;
             }
 
-            _semaphore = semaphore;
-            _taskHandle = taskHandle;
+            _taskHandle = creation.Handle;
             return true;
         }
 
         static void _taskEntry(void* parameter) {
             ThreadGarbageCollector* collector = static_cast<ThreadGarbageCollector*>(parameter);
             if (collector != nullptr) collector->_loop();
-            vTaskDelete(nullptr);
+            Task::TaskRuntime::Delete(nullptr);
         }
 
         void _loop() {
