@@ -1,6 +1,5 @@
 #include "ESPressio_Thread.hpp"
 #include "ESPressio_ThreadManager.hpp"
-#include "ESPressio_ThreadGarbageCollector.hpp"
 #include "ESPressio_ThreadTerminationDispatcher.hpp"
 
 namespace ESPressio {
@@ -51,8 +50,15 @@ namespace ESPressio {
             }
             ThreadManager::GetInstance()->RemoveThread(this);
         }
+
         void Thread::_requestGarbageCollection() {
-            ThreadGarbageCollector::GetInstance()->CleanUp();
+            /*
+             * Compatibility shim for the historical Thread::GarbageCollect()
+             * API. Automatic reclamation no longer owns a dedicated worker;
+             * ThreadManager contains the actual claim/remove/delete semantics
+             * and already defers cleanup while a manager iteration is active.
+             */
+            ThreadManager::GetInstance()->CleanUp();
         }
 
         bool Thread::_isTerminationDispatcherAvailable() {
@@ -94,24 +100,20 @@ namespace ESPressio {
                 }
             }
 
-            const bool requestGarbageCollection =
-                terminated && GetFreeOnTerminate();
-
             if (taskExited != nullptr) {
                 xSemaphoreGive(taskExited);
             }
-            // This is the dispatcher's final access to the Thread object.
+
+            /*
+             * The dispatcher performs manager-owned automatic reclamation only
+             * after this method returns. Clearing the pending flag here lets
+             * explicitly-owned Thread destructors complete once their native
+             * task has been deleted, while ReleaseOnTerminate objects remain
+             * manager-owned until the dispatcher's cleanup pass claims them.
+             */
             _terminationDispatchPending.store(false, std::memory_order_release);
-            if (requestGarbageCollection) {
-                try {
-                    _requestGarbageCollection();
-                } catch (...) {
-                    // Infrastructure failures must not terminate the
-                    // dispatcher task. The object remains manager-owned and
-                    // can be collected by a later explicit cleanup request.
-                }
-            }
         }
+
         void Thread::GarbageCollect() {
             if (GetFreeOnTerminate()) {
                 _requestGarbageCollection();
