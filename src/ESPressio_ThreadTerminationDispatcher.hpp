@@ -5,6 +5,7 @@
 #include "freertos/task.h"
 
 #include <memory>
+#include <mutex>
 #include <ESPressio_IObservable.hpp>
 
 #include "ESPressio_IThreadTerminationDispatcherObserver.hpp"
@@ -129,13 +130,16 @@ namespace Threads {
 
         QueueHandle_t _queue = nullptr;
         TaskHandle_t _taskHandle = nullptr;
+        mutable std::mutex _initializationMutex;
 
         std::shared_ptr<DispatcherObservable>
             _observable =
                 std::make_shared<DispatcherObservable>();
 
 
-        ThreadTerminationDispatcher();
+        ThreadTerminationDispatcher() = default;
+
+        bool _initialize();
 
         static void _taskEntry(
             void* parameter
@@ -173,11 +177,11 @@ namespace Threads {
                     observer
                 );
 
-            if (observer != nullptr) {
+            if (observer != nullptr && IsAvailable()) {
                 try {
                     observer->
                         OnThreadTerminationDispatcherInitialized(
-                            IsAvailable()
+                            true
                         );
                 } catch (...) {
                 }
