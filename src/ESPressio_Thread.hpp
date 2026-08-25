@@ -12,6 +12,7 @@
 
 #include "ESPressio_IThread.hpp"
 #include "ESPressio_IThreadObserver.hpp"
+#include "ESPressio_ThreadReleasePolicy.hpp"
 #include "ESPressio_ThreadSafe.hpp"
 #include "ESPressio_ThreadSafeObservable.hpp"
 
@@ -535,13 +536,6 @@ namespace ESPressio {
                         _queueTaskExitFinalization();
                     }
 
-                    /*
-                     * The termination dispatcher owns deletion of an exited
-                     * ESPressio task. Suspending here guarantees that the
-                     * Thread object remains alive until the dispatcher has
-                     * deleted the underlying FreeRTOS task and completed the
-                     * deferred termination callbacks/observer notification.
-                     */
                     vTaskSuspend(nullptr);
 
                     for (;;) {
@@ -721,8 +715,6 @@ namespace ESPressio {
                         }
                     }
 
-                    // Reentrant state callbacks may have already moved the
-                    // object to another state.
                     if (
                         onThreadEvent !=
                             nullptr &&
@@ -886,13 +878,19 @@ namespace ESPressio {
 
 
                 explicit Thread(
-                    bool freeOnTerminate
+                    ThreadReleasePolicy releasePolicy
                 ) :
                     Thread() {
 
-                    SetFreeOnTerminate(
-                        freeOnTerminate
-                    );
+                    switch (releasePolicy) {
+                        case ThreadReleasePolicy::ExplicitRelease:
+                            SetFreeOnTerminate(false);
+                            break;
+
+                        case ThreadReleasePolicy::ReleaseOnTerminate:
+                            SetFreeOnTerminate(true);
+                            break;
+                    }
                 }
 
 
@@ -1692,28 +1690,34 @@ namespace ESPressio {
                         value
                     );
 
-                    if (value) {
-                        CleanupClaim expected =
-                            CleanupClaim::Manual;
+                    switch (value) {
+                        case true: {
+                            CleanupClaim expected =
+                                CleanupClaim::Manual;
 
-                        _cleanupClaim.
-                            compare_exchange_strong(
-                                expected,
-                                CleanupClaim::Available,
-                                std::memory_order_acq_rel,
-                                std::memory_order_acquire
-                            );
-                    } else {
-                        CleanupClaim expected =
-                            CleanupClaim::Available;
+                            _cleanupClaim.
+                                compare_exchange_strong(
+                                    expected,
+                                    CleanupClaim::Available,
+                                    std::memory_order_acq_rel,
+                                    std::memory_order_acquire
+                                );
+                            break;
+                        }
 
-                        _cleanupClaim.
-                            compare_exchange_strong(
-                                expected,
-                                CleanupClaim::Manual,
-                                std::memory_order_acq_rel,
-                                std::memory_order_acquire
-                            );
+                        case false: {
+                            CleanupClaim expected =
+                                CleanupClaim::Available;
+
+                            _cleanupClaim.
+                                compare_exchange_strong(
+                                    expected,
+                                    CleanupClaim::Manual,
+                                    std::memory_order_acq_rel,
+                                    std::memory_order_acquire
+                                );
+                            break;
+                        }
                     }
                 }
 
