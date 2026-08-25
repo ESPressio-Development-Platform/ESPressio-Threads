@@ -161,3 +161,27 @@ The primary `Thread` task itself still uses direct FreeRTOS create/delete/curren
 - `32fa75e` — `refactor(#72): create garbage collector worker through ESPressio Task runtime`
 - `c021d75` / `fe44756` — working-branch Task dependency metadata
 - `51c05ec` — `test(#72): guard ESPressio Task ownership of infrastructure workers`
+
+## 2026-08-25 — Garbage collector task retired; reclamation absorbed by dispatcher (#72)
+
+Full-stack hardware profiling showed that the dedicated `ThreadGarbageCollector` represented an avoidable internal-RAM reservation on a system already reaching ESP-NOW `ESP_ERR_ESPNOW_NO_MEM`. Architectural review confirmed that the collector did not provide a unique reclamation mechanism: its ultimate operation was `ThreadManager::CleanUpWithResult()`, while the termination dispatcher already supplied the independent execution context required to delete a Thread only after its own native task stack had stopped executing.
+
+### New lifecycle
+- a terminating Thread still suspends and queues exactly one termination-dispatch record;
+- `ThreadTerminationDispatcher` deletes the native worker task, delivers `OnTerminated` / `OnThreadTaskExited`, and releases shutdown waiters;
+- after `_dispatchTermination()` returns, the dispatcher invokes `ThreadManager::CleanUpWithResult()`;
+- `ThreadManager` remains the sole owner of automatic cleanup eligibility, atomic claim, registry removal, deferred-iteration handling, and C++ object deletion;
+- cleanup is requested after every completed termination so an `OnTerminated` callback may still change `FreeOnTerminate` before manager eligibility is evaluated;
+- after manager cleanup begins, the dispatcher never dereferences the raw `Thread*` again and uses only the captured value snapshot for observer completion.
+
+### Removed infrastructure
+The dedicated garbage-collector task, its 2000-byte stack, binary semaphore, TaskRuntime worker, GC-specific observable/observer/result API and standalone example have been removed. The historical `Thread::GarbageCollect()` method remains as a source-compatibility shim but now delegates directly to `ThreadManager` and allocates no worker infrastructure.
+
+### Concurrency semantics preserved
+`ThreadManager::CleanUpWithResult()` already defers cleanup when `_activeIterations > 0`; the final manager `IterationGuard` performs the pending cleanup later. A second task is therefore unnecessary for safe deferral. Explicit-release Threads remain unclaimed, and `ReleaseOnTerminate` objects remain protected by `TryClaimAutomaticCleanup()`.
+
+### Expected resource saving
+Once the previous GC path would have initialized, the new architecture permanently avoids the collector's 2000-byte task stack plus FreeRTOS task-control allocation, semaphore, shared observable state and scheduling/context-switch overhead.
+
+### Validation
+The Task-runtime CI guard now rejects reintroduction of any `*GarbageCollector*` source file, requires dispatcher-to-manager cleanup, and compiles both explicit-release and automatic-release Thread construction/lifecycle paths against the Task working branch.
