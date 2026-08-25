@@ -1,5 +1,6 @@
 #include "ESPressio_ThreadTerminationDispatcher.hpp"
 #include "ESPressio_Thread.hpp"
+#include <ESPressio_Task.hpp>
 
 namespace ESPressio {
 namespace Threads {
@@ -46,37 +47,31 @@ namespace Threads {
         }
 
         /*
-         * Publish the queue before creating the worker task. On a dual-core
-         * ESP32, xTaskCreate() may make the new task runnable immediately on
-         * the other core before this function returns. Publishing _queue only
-         * after xTaskCreate() therefore allows _loop() to enter
-         * xQueueReceive(nullptr, ...).
-         *
-         * _initializationMutex prevents another lifecycle caller from
-         * observing this partially-created state. The dispatcher worker only
-         * needs _queue during startup, so publishing it here closes that race
-         * without exposing a usable dispatcher through IsAvailable().
+         * Publish dependencies before the worker can become runnable. The
+         * ESPressio Task runtime may make the FreeRTOS task runnable on the
+         * other core before Create() returns.
          */
         _queue = queue;
 
-        TaskHandle_t taskHandle = nullptr;
-        const BaseType_t result = xTaskCreate(
+        Task::TaskConfiguration configuration;
+        configuration.Name = "threadTerminationDispatcher";
+        configuration.StackSize = ESPRESSIO_THREAD_TERMINATION_DISPATCHER_STACK_SIZE;
+        configuration.Priority = ESPRESSIO_THREAD_TERMINATION_DISPATCHER_PRIORITY;
+
+        const auto creation = Task::TaskRuntime::Create(
             _taskEntry,
-            "threadTerminationDispatcher",
-            ESPRESSIO_THREAD_TERMINATION_DISPATCHER_STACK_SIZE,
             this,
-            ESPRESSIO_THREAD_TERMINATION_DISPATCHER_PRIORITY,
-            &taskHandle
+            configuration
         );
 
-        if (result != pdPASS) {
+        if (!creation) {
             _queue = nullptr;
             vQueueDelete(queue);
             _observable->Initialized(false);
             return false;
         }
 
-        _taskHandle = taskHandle;
+        _taskHandle = creation.Handle;
         _observable->Initialized(true);
         return true;
     }
@@ -90,7 +85,7 @@ namespace Threads {
             dispatcher->_loop();
         }
 
-        vTaskDelete(nullptr);
+        Task::TaskRuntime::Delete(nullptr);
     }
 
 
@@ -144,7 +139,7 @@ namespace Threads {
         std::lock_guard<std::mutex> lock(_initializationMutex);
         return
             _taskHandle != nullptr &&
-            xTaskGetCurrentTaskHandle() == _taskHandle;
+            Task::TaskRuntime::Current() == _taskHandle;
     }
 
 
@@ -171,12 +166,6 @@ namespace Threads {
         record.ThreadPointer = thread;
         record.Snapshot = SnapshotThread(thread);
 
-        /*
-         * Dispatch runs from normal ESPressio lifecycle contexts and may wait
-         * for queue capacity. Lazy initialization only changes when the queue
-         * and worker are allocated; delivery/backpressure semantics remain the
-         * same once termination work exists.
-         */
         const bool queued =
             xQueueSend(queue, &record, portMAX_DELAY) == pdTRUE;
 
