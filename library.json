@@ -9,8 +9,8 @@
         "url": "https://espressio.org"
     },
     "build": {
-        "flags": ["-std=gnu++17", "-frtti"],
-        "unflags": ["-std=gnu++11", "-fno-rtti"]
+        "flags": ["-std=gnu++17"],
+        "unflags": ["-std=gnu++11"]
     },
     "repository": {
         "type": "git",
@@ -27,15 +27,15 @@
         },
         {
             "name": "ESPressio-Units",
-            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Units.git#0.2.7"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Units.git#chore/27-serializable-0.11.3-cascade"
         },
         {
             "name": "ESPressio-Timing",
-            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git#2.2.8"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git#main"
         },
         {
             "name": "ESPressio-Observable",
-            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Observable.git#3.0.2"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Observable.git#feature/16-rtti-free-observer-registry"
         }
     ]
 }
