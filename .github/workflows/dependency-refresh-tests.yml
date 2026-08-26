@@ -2,11 +2,7 @@ name: Dependency Refresh Tests
 
 on:
   push:
-    branches:
-      - main
   pull_request:
-    branches:
-      - main
 
 jobs:
   esp32-compile:
@@ -18,23 +14,28 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Timing
-          ref: 2.2.8
+          ref: main
           path: project/dependencies/ESPressio-Timing
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Units
-          ref: 0.2.7
+          ref: main
           path: project/dependencies/ESPressio-Units
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Observable
-          ref: 3.0.2
+          ref: feature/16-rtti-free-observer-registry
           path: project/dependencies/ESPressio-Observable
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Serializable
-          ref: 0.11.3
+          ref: optimisation/25-psram-buffers
           path: project/dependencies/ESPressio-Serializable
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Task
+          ref: feature/1-task-execution
+          path: project/dependencies/ESPressio-Task
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
@@ -51,12 +52,14 @@ jobs:
           framework = arduino
           build_flags =
               -std=gnu++17
-              -frtti
+              -fno-rtti
+              -DESPRESSIO_SERIALIZATION_PREFER_PSRAM
           build_unflags =
               -std=gnu++11
-              -fno-rtti
+              -frtti
           lib_ldf_mode = deep+
           lib_deps =
+              ../dependencies/ESPressio-Task
               ../dependencies/ESPressio-Observable
               ../dependencies/ESPressio-Serializable
               ../dependencies/ESPressio-Units
@@ -88,5 +91,5 @@ jobs:
           }
           void loop() {}
           EOF
-      - name: Compile Threads against Timing 2.2.8 and Serializable PrecisionThread surface
+      - name: Compile Threads against current lead dependency branches without RTTI
         run: pio run -d project/compile
