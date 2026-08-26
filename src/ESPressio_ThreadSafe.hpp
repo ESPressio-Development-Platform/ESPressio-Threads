@@ -37,6 +37,9 @@ namespace ESPressio {
         template <typename T>
         class IThreadSafe {
             public:
+                using MutableCallback = std::function<void(T&)>;
+                using SharedReadCallback = std::function<void(const T&)>;
+
                 virtual ~IThreadSafe() = default;
 
                 virtual T Get() = 0;
@@ -47,19 +50,19 @@ namespace ESPressio {
                 virtual bool IsLockedRead() = 0;
                 virtual bool IsLockedWrite() = 0;
 
-                virtual void WithReadLock(std::function<void(T&)> callback) = 0;
-                virtual void WithWriteLock(std::function<void(T&)> callback) = 0;
-                virtual bool TryWithReadLock(std::function<void(T&)> callback) = 0;
-                virtual bool TryWithWriteLock(std::function<void(T&)> callback) = 0;
+                virtual void WithReadLock(const MutableCallback& callback) = 0;
+                virtual void WithWriteLock(const MutableCallback& callback) = 0;
+                virtual bool TryWithReadLock(const MutableCallback& callback) = 0;
+                virtual bool TryWithWriteLock(const MutableCallback& callback) = 0;
 
                 virtual void WithSharedReadLock(
-                    std::function<void(const T&)> callback
+                    const SharedReadCallback& callback
                 ) {
                     WithReadLock([&](T& value) { callback(value); });
                 }
 
                 virtual bool TryWithSharedReadLock(
-                    std::function<void(const T&)> callback
+                    const SharedReadCallback& callback
                 ) {
                     return TryWithReadLock([&](T& value) { callback(value); });
                 }
@@ -89,6 +92,9 @@ namespace ESPressio {
         template <typename T>
         class Mutex : public IThreadSafe<T> {
             private:
+                using MutableCallback = typename IThreadSafe<T>::MutableCallback;
+                using SharedReadCallback = typename IThreadSafe<T>::SharedReadCallback;
+
                 T _value;
                 std::mutex _mutex;
                 std::unique_ptr<ThreadSafeCallbacks<T>> _callbacks;
@@ -109,7 +115,7 @@ namespace ESPressio {
                     T value,
                     std::function<void(T,T)> onChange = nullptr,
                     std::function<bool(T,T)> onCompare = nullptr
-                ) : _value(value) {
+                ) : _value(std::move(value)) {
                     if (onChange != nullptr || onCompare != nullptr) {
                         _callbacks = std::make_unique<ThreadSafeCallbacks<T>>(
                             std::move(onChange),
@@ -127,7 +133,7 @@ namespace ESPressio {
 
                 std::pair<bool, T> TryGet(T defaultValue) override {
                     std::unique_lock<std::mutex> lock(_mutex, std::try_to_lock);
-                    if (!lock.owns_lock()) return std::make_pair(false, defaultValue);
+                    if (!lock.owns_lock()) return std::make_pair(false, std::move(defaultValue));
                     return std::make_pair(true, _value);
                 }
 
@@ -143,10 +149,14 @@ namespace ESPressio {
                         std::lock_guard<std::mutex> lock(_mutex);
                         oldValue = _value;
                         if (_equals(oldValue, value)) return;
-                        _value = value;
                         onChange = _onChange();
+                        if (onChange == nullptr) {
+                            _value = std::move(value);
+                            return;
+                        }
+                        _value = value;
                     }
-                    if (onChange != nullptr) onChange(oldValue, value);
+                    onChange(oldValue, value);
                 }
 
                 bool TrySet(T value) override {
@@ -157,50 +167,52 @@ namespace ESPressio {
                         if (!lock.owns_lock()) return false;
                         oldValue = _value;
                         if (_equals(oldValue, value)) return true;
-                        _value = value;
                         onChange = _onChange();
+                        if (onChange == nullptr) {
+                            _value = std::move(value);
+                            return true;
+                        }
+                        _value = value;
                     }
-                    if (onChange != nullptr) onChange(oldValue, value);
+                    onChange(oldValue, value);
                     return true;
                 }
 
                 bool IsLockedRead() override {
-                    if (_mutex.try_lock()) {
-                        _mutex.unlock();
-                        return false;
-                    }
-                    return true;
+                    if (!_mutex.try_lock()) return true;
+                    _mutex.unlock();
+                    return false;
                 }
 
                 bool IsLockedWrite() override { return IsLockedRead(); }
 
-                void WithReadLock(std::function<void(T&)> callback) override {
+                void WithReadLock(const MutableCallback& callback) override {
                     std::lock_guard<std::mutex> lock(_mutex);
                     callback(_value);
                 }
 
-                void WithWriteLock(std::function<void(T&)> callback) override {
+                void WithWriteLock(const MutableCallback& callback) override {
                     std::lock_guard<std::mutex> lock(_mutex);
                     callback(_value);
                 }
 
-                bool TryWithReadLock(std::function<void(T&)> callback) override {
+                bool TryWithReadLock(const MutableCallback& callback) override {
                     std::unique_lock<std::mutex> lock(_mutex, std::try_to_lock);
                     if (!lock.owns_lock()) return false;
                     callback(_value);
                     return true;
                 }
 
-                bool TryWithWriteLock(std::function<void(T&)> callback) override {
-                    return TryWithReadLock(std::move(callback));
+                bool TryWithWriteLock(const MutableCallback& callback) override {
+                    return TryWithReadLock(callback);
                 }
 
-                void WithSharedReadLock(std::function<void(const T&)> callback) override {
+                void WithSharedReadLock(const SharedReadCallback& callback) override {
                     std::lock_guard<std::mutex> lock(_mutex);
                     callback(_value);
                 }
 
-                bool TryWithSharedReadLock(std::function<void(const T&)> callback) override {
+                bool TryWithSharedReadLock(const SharedReadCallback& callback) override {
                     std::unique_lock<std::mutex> lock(_mutex, std::try_to_lock);
                     if (!lock.owns_lock()) return false;
                     callback(_value);
@@ -216,6 +228,9 @@ namespace ESPressio {
         template <typename T>
         class ReadWriteMutex : public IThreadSafe<T> {
             private:
+                using MutableCallback = typename IThreadSafe<T>::MutableCallback;
+                using SharedReadCallback = typename IThreadSafe<T>::SharedReadCallback;
+
                 T _value;
                 std::shared_mutex _mutex;
                 std::unique_ptr<ThreadSafeCallbacks<T>> _callbacks;
@@ -236,7 +251,7 @@ namespace ESPressio {
                     T value,
                     std::function<void(T,T)> onChange = nullptr,
                     std::function<bool(T,T)> onCompare = nullptr
-                ) : _value(value) {
+                ) : _value(std::move(value)) {
                     if (onChange != nullptr || onCompare != nullptr) {
                         _callbacks = std::make_unique<ThreadSafeCallbacks<T>>(
                             std::move(onChange),
@@ -254,7 +269,7 @@ namespace ESPressio {
 
                 std::pair<bool, T> TryGet(T defaultValue) override {
                     std::shared_lock<std::shared_mutex> lock(_mutex, std::try_to_lock);
-                    if (!lock.owns_lock()) return std::make_pair(false, defaultValue);
+                    if (!lock.owns_lock()) return std::make_pair(false, std::move(defaultValue));
                     return std::make_pair(true, _value);
                 }
 
@@ -270,10 +285,14 @@ namespace ESPressio {
                         std::unique_lock<std::shared_mutex> lock(_mutex);
                         oldValue = _value;
                         if (_equals(oldValue, value)) return;
-                        _value = value;
                         onChange = _onChange();
+                        if (onChange == nullptr) {
+                            _value = std::move(value);
+                            return;
+                        }
+                        _value = value;
                     }
-                    if (onChange != nullptr) onChange(oldValue, value);
+                    onChange(oldValue, value);
                 }
 
                 bool TrySet(T value) override {
@@ -284,47 +303,47 @@ namespace ESPressio {
                         if (!lock.owns_lock()) return false;
                         oldValue = _value;
                         if (_equals(oldValue, value)) return true;
-                        _value = value;
                         onChange = _onChange();
+                        if (onChange == nullptr) {
+                            _value = std::move(value);
+                            return true;
+                        }
+                        _value = value;
                     }
-                    if (onChange != nullptr) onChange(oldValue, value);
+                    onChange(oldValue, value);
                     return true;
                 }
 
                 bool IsLockedRead() override {
-                    if (_mutex.try_lock_shared()) {
-                        _mutex.unlock_shared();
-                        return false;
-                    }
-                    return true;
+                    if (!_mutex.try_lock_shared()) return true;
+                    _mutex.unlock_shared();
+                    return false;
                 }
 
                 bool IsLockedWrite() override {
-                    if (_mutex.try_lock()) {
-                        _mutex.unlock();
-                        return false;
-                    }
-                    return true;
+                    if (!_mutex.try_lock()) return true;
+                    _mutex.unlock();
+                    return false;
                 }
 
-                void WithReadLock(std::function<void(T&)> callback) override {
+                void WithReadLock(const MutableCallback& callback) override {
                     std::unique_lock<std::shared_mutex> lock(_mutex);
                     callback(_value);
                 }
 
-                bool TryWithReadLock(std::function<void(T&)> callback) override {
+                bool TryWithReadLock(const MutableCallback& callback) override {
                     std::unique_lock<std::shared_mutex> lock(_mutex, std::try_to_lock);
                     if (!lock.owns_lock()) return false;
                     callback(_value);
                     return true;
                 }
 
-                void WithSharedReadLock(std::function<void(const T&)> callback) override {
+                void WithSharedReadLock(const SharedReadCallback& callback) override {
                     std::shared_lock<std::shared_mutex> lock(_mutex);
                     callback(_value);
                 }
 
-                bool TryWithSharedReadLock(std::function<void(const T&)> callback) override {
+                bool TryWithSharedReadLock(const SharedReadCallback& callback) override {
                     std::shared_lock<std::shared_mutex> lock(_mutex, std::try_to_lock);
                     if (!lock.owns_lock()) return false;
                     callback(_value);
@@ -334,12 +353,12 @@ namespace ESPressio {
                 void ReleaseLock() override { ReleaseReadLock(); }
                 void ReleaseReadLock() override { _mutex.unlock_shared(); }
 
-                void WithWriteLock(std::function<void(T&)> callback) override {
+                void WithWriteLock(const MutableCallback& callback) override {
                     std::unique_lock<std::shared_mutex> lock(_mutex);
                     callback(_value);
                 }
 
-                bool TryWithWriteLock(std::function<void(T&)> callback) override {
+                bool TryWithWriteLock(const MutableCallback& callback) override {
                     std::unique_lock<std::shared_mutex> lock(_mutex, std::try_to_lock);
                     if (!lock.owns_lock()) return false;
                     callback(_value);
