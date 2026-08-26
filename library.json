@@ -26,6 +26,10 @@
             "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Task.git#feature/1-task-execution"
         },
         {
+            "name": "ESPressio-Units",
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Units.git#0.2.7"
+        },
+        {
             "name": "ESPressio-Timing",
             "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git#2.2.8"
         },
