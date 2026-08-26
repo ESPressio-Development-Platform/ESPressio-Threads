@@ -27,7 +27,7 @@
         },
         {
             "name": "ESPressio-Units",
-            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Units.git#chore/27-serializable-0.11.3-cascade"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Units.git#main"
         },
         {
             "name": "ESPressio-Timing",
