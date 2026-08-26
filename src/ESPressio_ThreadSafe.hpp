@@ -161,13 +161,16 @@ namespace ESPressio {
                             return;
                         }
 
-                        _value = std::move(value);
+                        if (_onChange == nullptr) {
+                            _value = std::move(value);
+                            return;
+                        }
+
+                        _value = value;
                         onChange = _onChange;
                     }
 
-                    if (onChange != nullptr) {
-                        onChange(oldValue, _value);
-                    }
+                    onChange(oldValue, value);
                 }
 
                 bool TrySet(T value) override {
@@ -190,14 +193,16 @@ namespace ESPressio {
                             return true;
                         }
 
-                        _value = std::move(value);
+                        if (_onChange == nullptr) {
+                            _value = std::move(value);
+                            return true;
+                        }
+
+                        _value = value;
                         onChange = _onChange;
                     }
 
-                    if (onChange != nullptr) {
-                        onChange(oldValue, _value);
-                    }
-
+                    onChange(oldValue, value);
                     return true;
                 }
 
@@ -354,13 +359,16 @@ namespace ESPressio {
                             return;
                         }
 
-                        _value = std::move(value);
+                        if (_onChange == nullptr) {
+                            _value = std::move(value);
+                            return;
+                        }
+
+                        _value = value;
                         onChange = _onChange;
                     }
 
-                    if (onChange != nullptr) {
-                        onChange(oldValue, _value);
-                    }
+                    onChange(oldValue, value);
                 }
 
                 bool TrySet(T value) override {
@@ -383,14 +391,16 @@ namespace ESPressio {
                             return true;
                         }
 
-                        _value = std::move(value);
+                        if (_onChange == nullptr) {
+                            _value = std::move(value);
+                            return true;
+                        }
+
+                        _value = value;
                         onChange = _onChange;
                     }
 
-                    if (onChange != nullptr) {
-                        onChange(oldValue, _value);
-                    }
-
+                    onChange(oldValue, value);
                     return true;
                 }
 
