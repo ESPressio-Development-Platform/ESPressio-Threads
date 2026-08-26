@@ -10,6 +10,7 @@
 #include <mutex>
 #include <vector>
 #include <memory>
+#include <utility>
 
 #include "ESPressio_ThreadSafe.hpp"
 #include "ESPressio_ThreadSafeObservable.hpp"
@@ -33,7 +34,7 @@ namespace ESPressio {
                 private:
                     template <typename TCallback>
                     void NotifyObservers(
-                        TCallback callback
+                        TCallback&& callback
                     ) {
                         ExecuteNotification(
                             [&](NotificationContext& notification) {
@@ -178,6 +179,21 @@ namespace ESPressio {
                             coreID == other.coreID;
                     }
                 };
+
+
+                struct ThreadInitializationTarget {
+                    IThread* thread;
+                    uint8_t id;
+                };
+
+
+                struct ClaimedCleanupRecord {
+                    uint8_t id;
+                    IThread* thread;
+                    ThreadManagerThreadSnapshot snapshot;
+                    bool removed;
+                };
+
 
                 ReadWriteMutex<
                     std::vector<ThreadRecord>
@@ -546,7 +562,11 @@ namespace ESPressio {
                     IThread* thread
                 ) {
                     bool removed = false;
-                    ThreadManagerThreadSnapshot snapshot;
+                    ThreadRecord removedRecord{
+                        0,
+                        nullptr,
+                        0
+                    };
 
                     _threads.WithWriteLock(
                         [&](std::vector<ThreadRecord>& threads) {
@@ -565,16 +585,16 @@ namespace ESPressio {
                                 return;
                             }
 
-                            snapshot =
-                                _snapshot(*matching);
-
+                            removedRecord = *matching;
                             threads.erase(matching);
                             removed = true;
                         }
                     );
 
                     if (removed) {
-                        _observable->ThreadRemoved(snapshot);
+                        _observable->ThreadRemoved(
+                            _snapshot(removedRecord)
+                        );
                     }
                 }
 
@@ -583,7 +603,11 @@ namespace ESPressio {
                     uint8_t threadID
                 ) {
                     bool removed = false;
-                    ThreadManagerThreadSnapshot snapshot;
+                    ThreadRecord removedRecord{
+                        0,
+                        nullptr,
+                        0
+                    };
 
                     _threads.WithWriteLock(
                         [&](std::vector<ThreadRecord>& threads) {
@@ -602,109 +626,81 @@ namespace ESPressio {
                                 return;
                             }
 
-                            snapshot =
-                                _snapshot(*matching);
-
+                            removedRecord = *matching;
                             threads.erase(matching);
                             removed = true;
                         }
                     );
 
                     if (removed) {
-                        _observable->ThreadRemoved(snapshot);
+                        _observable->ThreadRemoved(
+                            _snapshot(removedRecord)
+                        );
                     }
                 }
 
 
                 void ForEachThread(
-                    std::function<
+                    const std::function<
                         void(IThread*)
-                    > callback
+                    >& callback
                 ) {
                     IterationGuard iteration(
                         *this
                     );
 
-                    std::vector<
-                        ThreadRecord
-                    > snapshot;
+                    std::vector<IThread*> snapshot;
 
                     _threads.WithSharedReadLock(
                         [&snapshot](
-                            const std::vector<
-                                ThreadRecord
-                            >& threads
+                            const std::vector<ThreadRecord>& threads
                         ) {
-                            snapshot = threads;
+                            snapshot.reserve(threads.size());
+                            for (const ThreadRecord& record : threads) {
+                                snapshot.push_back(record.thread);
+                            }
                         }
                     );
 
-                    for (
-                        const ThreadRecord&
-                            record :
-                        snapshot
-                    ) {
-                        callback(
-                            record.thread
-                        );
+                    for (IThread* thread : snapshot) {
+                        callback(thread);
                     }
                 }
 
 
                 bool WithThread(
                     uint8_t threadID,
-                    std::function<
+                    const std::function<
                         void(IThread*)
-                    > callback
+                    >& callback
                 ) {
                     IterationGuard iteration(
                         *this
                     );
 
-                    ThreadRecord result{
-                        0,
-                        nullptr,
-                        0
-                    };
+                    IThread* result = nullptr;
 
                     _threads.WithSharedReadLock(
                         [
                             threadID,
                             &result
                         ](
-                            const std::vector<
-                                ThreadRecord
-                            >& threads
+                            const std::vector<ThreadRecord>& threads
                         ) {
-                            for (
-                                const ThreadRecord&
-                                    record :
-                                threads
-                            ) {
-                                if (
-                                    record.id ==
-                                    threadID
-                                ) {
-                                    result =
-                                        record;
-
+                            for (const ThreadRecord& record : threads) {
+                                if (record.id == threadID) {
+                                    result = record.thread;
                                     break;
                                 }
                             }
                         }
                     );
 
-                    if (
-                        result.thread ==
-                        nullptr
-                    ) {
+                    if (result == nullptr) {
                         return false;
                     }
 
-                    callback(
-                        result.thread
-                    );
-
+                    callback(result);
                     return true;
                 }
 
@@ -751,10 +747,7 @@ namespace ESPressio {
                     ThreadManagerCleanupResult result;
 
                     std::vector<ThreadRecord> snapshot;
-                    std::vector<ThreadRecord> claimedRecords;
-                    std::vector<ThreadManagerThreadSnapshot>
-                        removedSnapshots;
-                    std::vector<IThread*> deleteThreads;
+                    std::vector<ClaimedCleanupRecord> claimedRecords;
 
                     std::unique_lock<std::recursive_mutex>
                         iterationLock(_iterationMutex);
@@ -802,15 +795,22 @@ namespace ESPressio {
                                 record.thread->
                                     TryClaimAutomaticCleanup()
                             ) {
-                                claimedRecords.push_back(
-                                    record
-                                );
+                                ClaimedCleanupRecord claimed{
+                                    record.id,
+                                    record.thread,
+                                    _snapshot(record),
+                                    false
+                                };
 
                                 ++result.ThreadsClaimed;
 
                                 _observable->CleanupClaimed(
                                     record.thread,
-                                    _snapshot(record)
+                                    claimed.snapshot
+                                );
+
+                                claimedRecords.push_back(
+                                    std::move(claimed)
                                 );
                             }
                         }
@@ -818,7 +818,7 @@ namespace ESPressio {
                         _threads.WithWriteLock(
                             [&](std::vector<ThreadRecord>& threads) {
                                 for (
-                                    const ThreadRecord& claimed :
+                                    ClaimedCleanupRecord& claimed :
                                     claimedRecords
                                 ) {
                                     const auto current =
@@ -840,15 +840,8 @@ namespace ESPressio {
                                         continue;
                                     }
 
-                                    deleteThreads.push_back(
-                                        current->thread
-                                    );
-
-                                    removedSnapshots.push_back(
-                                        _snapshot(*current)
-                                    );
-
                                     threads.erase(current);
+                                    claimed.removed = true;
                                     ++result.ThreadsRemoved;
                                 }
 
@@ -859,21 +852,21 @@ namespace ESPressio {
 
                         iterationLock.unlock();
 
-                        for (
-                            const ThreadManagerThreadSnapshot& removed :
-                            removedSnapshots
-                        ) {
-                            _observable->ThreadRemoved(
-                                removed
-                            );
-                        }
+                        for (ClaimedCleanupRecord& claimed : claimedRecords) {
+                            if (!claimed.removed) {
+                                continue;
+                            }
 
-                        /*
-                         * Destructors can re-enter ThreadManager. No manager
-                         * lock is held while deletion occurs.
-                         */
-                        for (IThread* thread : deleteThreads) {
-                            delete thread;
+                            _observable->ThreadRemoved(
+                                claimed.snapshot
+                            );
+
+                            /*
+                             * Destructors can re-enter ThreadManager. No manager
+                             * lock is held while deletion occurs.
+                             */
+                            delete claimed.thread;
+                            claimed.thread = nullptr;
                             ++result.ThreadsDeleted;
                         }
 
@@ -909,7 +902,7 @@ namespace ESPressio {
                     );
 
                     std::vector<
-                        ThreadRecord
+                        ThreadInitializationTarget
                     > snapshot;
 
                     std::vector<
@@ -918,11 +911,15 @@ namespace ESPressio {
 
                     _threads.WithSharedReadLock(
                         [&snapshot](
-                            const std::vector<
-                                ThreadRecord
-                            >& threads
+                            const std::vector<ThreadRecord>& threads
                         ) {
-                            snapshot = threads;
+                            snapshot.reserve(threads.size());
+                            for (const ThreadRecord& record : threads) {
+                                snapshot.push_back({
+                                    record.thread,
+                                    record.id
+                                });
+                            }
                         }
                     );
 
@@ -931,8 +928,7 @@ namespace ESPressio {
                     );
 
                     for (
-                        const ThreadRecord&
-                            record :
+                        const ThreadInitializationTarget& target :
                         snapshot
                     ) {
                         ThreadInitializationStatus
@@ -942,7 +938,7 @@ namespace ESPressio {
 
                         try {
                             status =
-                                record.thread->
+                                target.thread->
                                     Initialize();
                         } catch (...) {
                             // Custom IThread implementations do not have to
@@ -950,7 +946,7 @@ namespace ESPressio {
                         }
 
                         results.push_back({
-                            record.id,
+                            target.id,
                             status
                         });
                     }
