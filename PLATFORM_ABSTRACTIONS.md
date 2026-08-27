@@ -13,11 +13,8 @@ This file records changes made during the platform-abstraction tranche tracked b
 - Replaced native tick-duration scheduler waiting with portable millisecond timeout requests at the System signal boundary.
 - Added a portable processor-count capability to System execution and migrated `ThreadManager` from `portNUM_PROCESSORS` / `configNUMBER_OF_CORES` discovery to `System::Execution::Provider().ProcessorCount()`.
 - Verified the active termination-dispatcher headers no longer include native FreeRTOS headers; the historical garbage-collector source is not present on the working branch.
-
-## Remaining work in this repository
-
-- Update README compatibility/platform sections to describe Threads as a portable lifecycle layer over System/Task rather than an ESP32/FreeRTOS-specific library.
-- Run the repository CI suite against the coordinated System/Task working branches and correct any regressions.
+- Updated README platform architecture guidance to describe Threads as the portable lifecycle/scheduling layer over ESPressio-System and ESPressio-Task, with ESPressio-ESP32 supplying the FreeRTOS implementation on ESP32. Published 3.1.7 material is explicitly retained as release-history documentation rather than current working-branch architecture.
+- Validated the abstraction branch against the coordinated System/Task working branches. Host/runtime boundary guards, ESP32 compilation, Task-runtime compilation, TLS ownership, and WiFi/thread coexistence checks completed successfully before the documentation-only completion commits.
 
 ## Boundary
 
