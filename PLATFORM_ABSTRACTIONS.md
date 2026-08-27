@@ -8,18 +8,17 @@ This file records changes made during the platform-abstraction tranche tracked b
 - Reworked core `Thread` lifecycle state to use portable execution handles.
 - Replaced the FreeRTOS task-exit semaphore with a System binary signal.
 - Replaced task-notification startup gating with a System binary signal.
-- Replaced direct task delay/yield/suspend calls with `TaskRuntime`, which now delegates to System execution.
+- Replaced direct task delay/yield/suspend calls with `TaskRuntime`, which delegates to System execution.
 - Reworked `PrecisionThread` scheduler wake/wait signalling to use System synchronization rather than a FreeRTOS semaphore.
 - Replaced native tick-duration scheduler waiting with portable millisecond timeout requests at the System signal boundary.
-- Added a portable processor-count capability to System execution for removal of RTOS core-count macro discovery from thread allocation logic.
+- Added a portable processor-count capability to System execution and migrated `ThreadManager` from `portNUM_PROCESSORS` / `configNUMBER_OF_CORES` discovery to `System::Execution::Provider().ProcessorCount()`.
+- Verified the active termination-dispatcher headers no longer include native FreeRTOS headers; the historical garbage-collector source is not present on the working branch.
 
 ## Remaining work in this repository
 
-- Replace the `ThreadManager` compile-time FreeRTOS core-count discovery with `System::Execution::Provider().ProcessorCount()`.
-- Complete a source-wide verification for any residual direct FreeRTOS include/type/call after the core lifecycle migration.
-- Update README compatibility/platform sections once the source-wide verification is complete.
+- Update README compatibility/platform sections to describe Threads as a portable lifecycle layer over System/Task rather than an ESP32/FreeRTOS-specific library.
 - Run the repository CI suite against the coordinated System/Task working branches and correct any regressions.
 
 ## Boundary
 
-ESPressio-Threads owns long-lived thread lifecycle, precision scheduling and thread-manager semantics. ESPressio-System owns primitive execution/synchronization/queue capabilities; ESPressio-Task provides discrete task runtime semantics over those primitives; ESPressio-ESP32 supplies the FreeRTOS implementation.
+ESPressio-Threads owns long-lived thread lifecycle, precision scheduling and thread-manager semantics. ESPressio-System owns primitive execution/synchronization/queue capabilities; ESPressio-Task provides discrete task runtime semantics over those primitives; ESPressio-ESP32 supplies the FreeRTOS implementation for ESP32 targets.
