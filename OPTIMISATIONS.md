@@ -202,3 +202,28 @@ FreeRTOS task stacks, queues, task-control structures and other RTOS/native sync
 ### Commits
 - `f1c2033` — `optimise(#75): externalise ThreadManager registry and snapshots`
 - `00b3351` — working-branch System dependency metadata
+
+
+## 2026-08-27 — External-preferred per-Thread lifecycle observable (#77)
+
+Phase 12 completed the remaining obvious per-Thread allocation migration without moving RTOS-owned memory. `Thread::LifecycleObservable` is now created through ESPressio-System `ExternalPreferred` shared allocation instead of ordinary `std::make_shared`.
+
+FreeRTOS task stacks, queues, semaphores, mutexes and task-control storage remain internal/native by policy.
+
+Commit: `92ccec60f46d6794a468d4aa864575102f1727b3`.
+
+## 2026-08-27 — Stable lifecycle callbacks and typed observer registration (#76)
+
+Phase 14 removes recurring lifecycle `std::function` copies that existed solely to release `_callbackMutex` before invoking user code. Thread callback setters now move callables into stable immutable System-backed `ExternalPreferred` registrations; dispatch retains only `shared_ptr` lifetime ownership under the mutex and invokes after unlocking. Public callback getter signatures remain unchanged for explicit callers.
+
+`RegisterThreadObserver()` now registers `IThreadObserver` through the RTTI-free typed Observable contract used by lifecycle notification dispatch. Initialization-failure, execution-failure, state-transition, destruction and termination paths use stable callback lifetime snapshots rather than internal deep copies.
+
+Commits: `32d5c0b44f8c0dc4fc790c7fdafd8e80f405f5e4`, `be12c851390cac7afad0b46f77d90b6ab924de8b`.
+
+## 2026-08-27 — Per-thread stack high-water telemetry (#70)
+
+Phase 15 adds `ESPressio_ThreadStackTelemetry.hpp`, exposing a read-only `ThreadStackTelemetry` snapshot containing configured stack bytes, minimum free stack bytes and availability for initialized ESPressio Threads. The implementation uses the deterministic `thread<ID>` task naming contract and FreeRTOS high-water telemetry without changing scheduling or stack sizes.
+
+No generic stack-size reductions are made in this phase; the Lab consumes this API to gather post-optimisation hardware evidence before any further right-sizing decision.
+
+Commit: `a4a28c2ed6bbaeb3f7fac05356524e5cf8d28db2`.
