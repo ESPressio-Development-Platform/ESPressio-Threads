@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include <ESPressio_Execution.hpp>
 #include <ESPressio_Memory.hpp>
 #include "ESPressio_ThreadSafe.hpp"
 #include "ESPressio_ThreadSafeObservable.hpp"
@@ -154,13 +155,8 @@ private:
     };
 
     static int _getCoreCount() {
-#if defined(portNUM_PROCESSORS)
-        return portNUM_PROCESSORS > 0 ? portNUM_PROCESSORS : 1;
-#elif defined(configNUMBER_OF_CORES)
-        return configNUMBER_OF_CORES > 0 ? configNUMBER_OF_CORES : 1;
-#else
-        return 1;
-#endif
+        const uint32_t count = System::Execution::Provider().ProcessorCount();
+        return count > 0 ? static_cast<int>(count) : 1;
     }
 
 protected:
@@ -361,8 +357,6 @@ public:
                 }
             }
 
-            // The full record snapshot is no longer needed after claims have
-            // been resolved; release its external storage before deletion work.
             ThreadRecordStorage{}.swap(snapshot);
 
             _threads.WithWriteLock([&](auto& threads) {
