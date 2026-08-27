@@ -1,13 +1,12 @@
 #pragma once
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
-#include "freertos/task.h"
-
 #include <cstdint>
 #include <memory>
 #include <mutex>
+
 #include <ESPressio_IObservable.hpp>
+#include <ESPressio_Queue.hpp>
+#include <ESPressio_Task.hpp>
 
 #include "ESPressio_IThreadTerminationDispatcherObserver.hpp"
 #include "ESPressio_ThreadSafeObservable.hpp"
@@ -28,7 +27,6 @@ namespace ESPressio {
 namespace Threads {
 
     class Thread;
-
 
     class ThreadTerminationDispatcher {
 
@@ -61,108 +59,67 @@ namespace Threads {
             void Initialized(bool available) {
                 NotifyObservers(
                     [&](IThreadTerminationDispatcherObserver* observer) {
-                        observer->
-                            OnThreadTerminationDispatcherInitialized(
-                                available
-                            );
+                        observer->OnThreadTerminationDispatcherInitialized(available);
                     }
                 );
             }
 
-            void Queued(
-                const ThreadManagerThreadSnapshot& snapshot
-            ) {
+            void Queued(const ThreadManagerThreadSnapshot& snapshot) {
                 NotifyObservers(
                     [&](IThreadTerminationDispatcherObserver* observer) {
-                        observer->
-                            OnThreadTerminationDispatchQueued(
-                                snapshot
-                            );
+                        observer->OnThreadTerminationDispatchQueued(snapshot);
                     }
                 );
             }
 
-            void QueueFailed(
-                const ThreadManagerThreadSnapshot& snapshot
-            ) {
+            void QueueFailed(const ThreadManagerThreadSnapshot& snapshot) {
                 NotifyObservers(
                     [&](IThreadTerminationDispatcherObserver* observer) {
-                        observer->
-                            OnThreadTerminationDispatchQueueFailed(
-                                snapshot
-                            );
+                        observer->OnThreadTerminationDispatchQueueFailed(snapshot);
                     }
                 );
             }
 
-            void Started(
-                const ThreadManagerThreadSnapshot& snapshot
-            ) {
+            void Started(const ThreadManagerThreadSnapshot& snapshot) {
                 NotifyObservers(
                     [&](IThreadTerminationDispatcherObserver* observer) {
-                        observer->
-                            OnThreadTerminationDispatchStarted(
-                                snapshot
-                            );
+                        observer->OnThreadTerminationDispatchStarted(snapshot);
                     }
                 );
             }
 
-            void Completed(
-                const ThreadManagerThreadSnapshot& snapshot
-            ) {
+            void Completed(const ThreadManagerThreadSnapshot& snapshot) {
                 NotifyObservers(
                     [&](IThreadTerminationDispatcherObserver* observer) {
-                        observer->
-                            OnThreadTerminationDispatchCompleted(
-                                snapshot
-                            );
+                        observer->OnThreadTerminationDispatchCompleted(snapshot);
                     }
                 );
             }
         };
-
 
         struct DispatchRecord {
             Thread* ThreadPointer = nullptr;
             ThreadManagerThreadSnapshot Snapshot;
         };
 
-
-        QueueHandle_t _queue = nullptr;
-        TaskHandle_t _taskHandle = nullptr;
+        std::unique_ptr<System::Queue::IMessageQueue> _queue;
+        Task::TaskHandle _taskHandle = System::Execution::InvalidExecutionHandle;
         mutable std::mutex _initializationMutex;
 
         std::shared_ptr<DispatcherObservable>
-            _observable =
-                std::make_shared<DispatcherObservable>();
-
+            _observable = std::make_shared<DispatcherObservable>();
 
         ThreadTerminationDispatcher() = default;
 
         bool _initialize();
-
-        static void _taskEntry(
-            void* parameter
-        );
-
+        static void _taskEntry(void* parameter);
         void _loop();
 
-
     public:
-        ThreadTerminationDispatcher(
-            const ThreadTerminationDispatcher&
-        ) = delete;
+        ThreadTerminationDispatcher(const ThreadTerminationDispatcher&) = delete;
+        ThreadTerminationDispatcher& operator=(const ThreadTerminationDispatcher&) = delete;
 
-        ThreadTerminationDispatcher&
-        operator=(
-            const ThreadTerminationDispatcher&
-        ) = delete;
-
-
-        static ThreadTerminationDispatcher*
-        GetInstance();
-
+        static ThreadTerminationDispatcher* GetInstance();
 
         bool IsAvailable() const;
         bool EnsureAvailable();
@@ -170,22 +127,14 @@ namespace Threads {
         uint32_t GetMinimumFreeStackBytes() const;
         bool Dispatch(Thread* thread);
 
-
-        Observable::ObserverHandlePtr
-        RegisterObserver(
+        Observable::ObserverHandlePtr RegisterObserver(
             IThreadTerminationDispatcherObserver* observer
         ) {
-            auto handle =
-                _observable->RegisterObserver(
-                    observer
-                );
+            auto handle = _observable->RegisterObserver(observer);
 
             if (observer != nullptr && IsAvailable()) {
                 try {
-                    observer->
-                        OnThreadTerminationDispatcherInitialized(
-                            true
-                        );
+                    observer->OnThreadTerminationDispatcherInitialized(true);
                 } catch (...) {
                 }
             }
@@ -193,13 +142,10 @@ namespace Threads {
             return handle;
         }
 
-
         void UnregisterObserver(
             IThreadTerminationDispatcherObserver* observer
         ) {
-            _observable->UnregisterObserver(
-                observer
-            );
+            _observable->UnregisterObserver(observer);
         }
     };
 
