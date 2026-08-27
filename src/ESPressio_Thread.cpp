@@ -2,6 +2,8 @@
 #include "ESPressio_ThreadManager.hpp"
 #include "ESPressio_ThreadTerminationDispatcher.hpp"
 
+#include <ESPressio_Memory.hpp>
+
 namespace ESPressio {
 
     namespace Threads {
@@ -9,7 +11,10 @@ namespace ESPressio {
         Thread::Thread() : _threadID(0) {
             try {
                 _lifecycleObservable =
-                    std::make_shared<LifecycleObservable>();
+                    System::Memory::MakeShared<
+                        LifecycleObservable,
+                        System::Memory::MemoryPolicy::ExternalPreferred
+                    >();
                 SetCoreID(
                     ThreadManager::GetInstance()->AddThread(this, &_threadID)
                 );
