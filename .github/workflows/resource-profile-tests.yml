@@ -30,8 +30,8 @@ jobs:
           platform = espressif32
           board = esp32dev
           framework = arduino
-          build_flags = -std=gnu++17 -frtti
-          build_unflags = -std=gnu++11 -fno-rtti
+          build_flags = -std=gnu++17 -fno-rtti
+          build_unflags = -std=gnu++11 -frtti
           lib_ldf_mode = deep+
           lib_deps =
               ../dependencies/ESPressio-System
@@ -51,12 +51,20 @@ jobs:
           EOF
           cat > project/compile/src/main.cpp <<'EOF'
           #include <Arduino.h>
+          #include <ESPressio_Thread.hpp>
+          #include <ESPressio_ThreadStackTelemetry.hpp>
           #include <ESPressio_ThreadTerminationDispatcher.hpp>
           #ifndef EXPECTED_TERMINATION_QUEUE_LENGTH
           #define EXPECTED_TERMINATION_QUEUE_LENGTH 32
           #endif
           static_assert(ESPRESSIO_THREAD_TERMINATION_QUEUE_LENGTH == EXPECTED_TERMINATION_QUEUE_LENGTH, "termination queue profile must remain configurable");
-          void setup(){(void)ESPressio::Threads::ThreadTerminationDispatcher::GetInstance();}
+          class ProfileThread final : public ESPressio::Threads::Thread {};
+          void setup(){
+              ProfileThread thread;
+              const auto telemetry = ESPressio::Threads::GetThreadStackTelemetry(thread);
+              (void)telemetry;
+              (void)ESPressio::Threads::ThreadTerminationDispatcher::GetInstance();
+          }
           void loop(){delay(1000);}
           EOF
       - name: Compile default and overridden resource profiles
