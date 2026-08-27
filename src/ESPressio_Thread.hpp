@@ -12,6 +12,7 @@
 #include <string>
 
 #include <ESPressio_Task.hpp>
+#include <ESPressio_Memory.hpp>
 
 #include "ESPressio_IThread.hpp"
 #include "ESPressio_IThreadObserver.hpp"
@@ -119,6 +120,18 @@ private:
     using TOnThreadExecutionFailedEvent =
         std::function<void(IThread*, std::exception_ptr)>;
 
+    template<typename TCallback>
+    using StableCallback = std::shared_ptr<const TCallback>;
+
+    template<typename TCallback>
+    static StableCallback<TCallback> MakeStableCallback(TCallback value) {
+        if (!value) return nullptr;
+        return System::Memory::MakeShared<
+            TCallback,
+            System::Memory::MemoryPolicy::ExternalPreferred
+        >(std::move(value));
+    }
+
     uint8_t _threadID;
 
     ReadWriteMutex<ThreadState> _threadState{ThreadState::Uninitialized};
@@ -144,15 +157,15 @@ private:
     std::shared_ptr<LifecycleObservable> _lifecycleObservable;
 
     mutable std::mutex _callbackMutex;
-    TOnThreadEvent _onDestroy = nullptr;
-    TOnThreadEvent _onInitialize = nullptr;
-    TOnThreadEvent _onStart = nullptr;
-    TOnThreadEvent _onPause = nullptr;
-    TOnThreadEvent _onTerminate = nullptr;
-    TOnThreadEvent _onTerminated = nullptr;
-    TOnThreadInitializationFailedEvent _onInitializationFailed = nullptr;
-    TOnThreadExecutionFailedEvent _onExecutionFailed = nullptr;
-    TOnThreadStateChangeEvent _onStateChange = nullptr;
+    StableCallback<TOnThreadEvent> _onDestroy;
+    StableCallback<TOnThreadEvent> _onInitialize;
+    StableCallback<TOnThreadEvent> _onStart;
+    StableCallback<TOnThreadEvent> _onPause;
+    StableCallback<TOnThreadEvent> _onTerminate;
+    StableCallback<TOnThreadEvent> _onTerminated;
+    StableCallback<TOnThreadInitializationFailedEvent> _onInitializationFailed;
+    StableCallback<TOnThreadExecutionFailedEvent> _onExecutionFailed;
+    StableCallback<TOnThreadStateChangeEvent> _onStateChange;
 
     bool _isValidThreadStateTransition(ThreadState oldState, ThreadState newState) {
         if (oldState == newState) {
@@ -243,9 +256,13 @@ private:
             std::make_exception_ptr(ThreadExecutionException(std::move(cause)));
 
         try {
-            TOnThreadExecutionFailedEvent onExecutionFailed = GetOnExecutionFailed();
+            StableCallback<TOnThreadExecutionFailedEvent> onExecutionFailed;
+            {
+                std::lock_guard<std::mutex> lock(_callbackMutex);
+                onExecutionFailed = _onExecutionFailed;
+            }
             if (onExecutionFailed != nullptr) {
-                onExecutionFailed(this, executionFailure);
+                (*onExecutionFailed)(this, executionFailure);
             }
         } catch (...) {
         }
@@ -292,8 +309,8 @@ private:
     }
 
     void _dispatchThreadStateChange(ThreadState oldState, ThreadState newState) {
-        TOnThreadStateChangeEvent onStateChange;
-        TOnThreadEvent onThreadEvent;
+        StableCallback<TOnThreadStateChangeEvent> onStateChange;
+        StableCallback<TOnThreadEvent> onThreadEvent;
         bool callbackFailed = false;
 
         {
@@ -321,7 +338,7 @@ private:
 
         if (onStateChange != nullptr) {
             try {
-                onStateChange(this, oldState, newState);
+                (*onStateChange)(this, oldState, newState);
             } catch (...) {
                 callbackFailed = true;
             }
@@ -329,7 +346,7 @@ private:
 
         if (onThreadEvent != nullptr && GetThreadState() == newState) {
             try {
-                onThreadEvent(this);
+                (*onThreadEvent)(this);
             } catch (...) {
                 callbackFailed = true;
             }
@@ -421,7 +438,7 @@ public:
     void GarbageCollect();
 
     Observable::ObserverHandlePtr RegisterThreadObserver(IThreadObserver* observer) {
-        return _lifecycleObservable->RegisterObserver(observer);
+        return _lifecycleObservable->RegisterObserverAs<IThreadObserver>(observer);
     }
 
     void UnregisterThreadObserver(IThreadObserver* observer) {
@@ -721,39 +738,39 @@ public:
 
     TOnThreadEvent GetOnDestroy() override {
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        return _onDestroy;
+        return _onDestroy ? *_onDestroy : TOnThreadEvent{};
     }
     TOnThreadEvent GetOnInitialize() override {
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        return _onInitialize;
+        return _onInitialize ? *_onInitialize : TOnThreadEvent{};
     }
     TOnThreadEvent GetOnStart() override {
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        return _onStart;
+        return _onStart ? *_onStart : TOnThreadEvent{};
     }
     TOnThreadEvent GetOnPause() override {
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        return _onPause;
+        return _onPause ? *_onPause : TOnThreadEvent{};
     }
     TOnThreadEvent GetOnTerminate() override {
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        return _onTerminate;
+        return _onTerminate ? *_onTerminate : TOnThreadEvent{};
     }
     TOnThreadEvent GetOnTerminated() override {
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        return _onTerminated;
+        return _onTerminated ? *_onTerminated : TOnThreadEvent{};
     }
     TOnThreadInitializationFailedEvent GetOnInitializationFailed() override {
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        return _onInitializationFailed;
+        return _onInitializationFailed ? *_onInitializationFailed : TOnThreadInitializationFailedEvent{};
     }
     TOnThreadExecutionFailedEvent GetOnExecutionFailed() override {
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        return _onExecutionFailed;
+        return _onExecutionFailed ? *_onExecutionFailed : TOnThreadExecutionFailedEvent{};
     }
     TOnThreadStateChangeEvent GetOnStateChange() override {
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        return _onStateChange;
+        return _onStateChange ? *_onStateChange : TOnThreadStateChangeEvent{};
     }
 
     void SetCoreID(int value) override {
@@ -811,40 +828,49 @@ public:
     }
 
     void SetOnDestroy(TOnThreadEvent value) override {
+        auto callback = MakeStableCallback(std::move(value));
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        _onDestroy = value;
+        _onDestroy = std::move(callback);
     }
     void SetOnInitialize(TOnThreadEvent value) override {
+        auto callback = MakeStableCallback(std::move(value));
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        _onInitialize = value;
+        _onInitialize = std::move(callback);
     }
     void SetOnStart(TOnThreadEvent value) override {
+        auto callback = MakeStableCallback(std::move(value));
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        _onStart = value;
+        _onStart = std::move(callback);
     }
     void SetOnPause(TOnThreadEvent value) override {
+        auto callback = MakeStableCallback(std::move(value));
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        _onPause = value;
+        _onPause = std::move(callback);
     }
     void SetOnTerminate(TOnThreadEvent value) override {
+        auto callback = MakeStableCallback(std::move(value));
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        _onTerminate = value;
+        _onTerminate = std::move(callback);
     }
     void SetOnTerminated(TOnThreadEvent value) override {
+        auto callback = MakeStableCallback(std::move(value));
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        _onTerminated = value;
+        _onTerminated = std::move(callback);
     }
     void SetOnInitializationFailed(TOnThreadInitializationFailedEvent value) override {
+        auto callback = MakeStableCallback(std::move(value));
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        _onInitializationFailed = value;
+        _onInitializationFailed = std::move(callback);
     }
     void SetOnExecutionFailed(TOnThreadExecutionFailedEvent value) override {
+        auto callback = MakeStableCallback(std::move(value));
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        _onExecutionFailed = value;
+        _onExecutionFailed = std::move(callback);
     }
     void SetOnStateChange(TOnThreadStateChangeEvent value) override {
+        auto callback = MakeStableCallback(std::move(value));
         std::lock_guard<std::mutex> lock(_callbackMutex);
-        _onStateChange = value;
+        _onStateChange = std::move(callback);
     }
 };
 

@@ -39,10 +39,14 @@ namespace ESPressio {
             SetFreeOnTerminate(false);
             _waitForTerminationDispatch();
             SetThreadState(ThreadState::Destroyed);
-            TOnThreadEvent onDestroy = GetOnDestroy();
+            StableCallback<TOnThreadEvent> onDestroy;
+            {
+                std::lock_guard<std::mutex> lock(_callbackMutex);
+                onDestroy = _onDestroy;
+            }
             if (onDestroy != nullptr) {
                 try {
-                    onDestroy(this);
+                    (*onDestroy)(this);
                 } catch (...) {
                     // Destructors must not allow user callbacks to terminate
                     // the program or interrupt resource cleanup.
@@ -89,10 +93,14 @@ namespace ESPressio {
             const bool terminated =
                 GetThreadState() == ThreadState::Terminated;
             const SemaphoreHandle_t taskExited = _taskExited;
-            TOnThreadEvent onTerminated = GetOnTerminated();
+            StableCallback<TOnThreadEvent> onTerminated;
+            {
+                std::lock_guard<std::mutex> lock(_callbackMutex);
+                onTerminated = _onTerminated;
+            }
             if (terminated && onTerminated != nullptr) {
                 try {
-                    onTerminated(this);
+                    (*onTerminated)(this);
                 } catch (...) {
                     // User callbacks must not terminate the dispatcher task.
                 }
