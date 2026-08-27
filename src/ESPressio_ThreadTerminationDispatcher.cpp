@@ -8,10 +8,7 @@ namespace Threads {
 
     namespace {
 
-        ThreadManagerThreadSnapshot
-        SnapshotThread(
-            Thread* thread
-        ) {
+        ThreadManagerThreadSnapshot SnapshotThread(Thread* thread) {
             ThreadManagerThreadSnapshot snapshot;
 
             if (thread == nullptr) {
@@ -29,17 +26,16 @@ namespace Threads {
 
     }
 
-
     bool ThreadTerminationDispatcher::_initialize() {
         std::lock_guard<std::mutex> lock(_initializationMutex);
 
-        if (_queue != nullptr && _taskHandle != nullptr) {
+        if (_queue != nullptr &&
+            _taskHandle != System::Execution::InvalidExecutionHandle) {
             return true;
         }
 
-        QueueHandle_t queue = xQueueCreate(
-            ESPRESSIO_THREAD_TERMINATION_QUEUE_LENGTH,
-            sizeof(DispatchRecord)
+        auto queue = System::Queue::Create<DispatchRecord>(
+            ESPRESSIO_THREAD_TERMINATION_QUEUE_LENGTH
         );
 
         if (queue == nullptr) {
@@ -49,10 +45,10 @@ namespace Threads {
 
         /*
          * Publish dependencies before the worker can become runnable. The
-         * ESPressio Task runtime may make the FreeRTOS task runnable on the
-         * other core before Create() returns.
+         * installed execution provider may make the worker runnable on another
+         * processor before Create() returns.
          */
-        _queue = queue;
+        _queue = std::move(queue);
 
         Task::TaskConfiguration configuration;
         configuration.Name = "threadTerminationDispatcher";
@@ -66,8 +62,7 @@ namespace Threads {
         );
 
         if (!creation) {
-            _queue = nullptr;
-            vQueueDelete(queue);
+            _queue.reset();
             _observable->Initialized(false);
             return false;
         }
@@ -77,7 +72,6 @@ namespace Threads {
         return true;
     }
 
-
     void ThreadTerminationDispatcher::_taskEntry(void* parameter) {
         ThreadTerminationDispatcher* dispatcher =
             static_cast<ThreadTerminationDispatcher*>(parameter);
@@ -86,20 +80,16 @@ namespace Threads {
             dispatcher->_loop();
         }
 
-        Task::TaskRuntime::Delete(nullptr);
+        Task::TaskRuntime::Delete(System::Execution::InvalidExecutionHandle);
     }
-
 
     void ThreadTerminationDispatcher::_loop() {
         for (;;) {
             DispatchRecord record;
 
             if (
-                xQueueReceive(
-                    _queue,
-                    &record,
-                    portMAX_DELAY
-                ) != pdTRUE ||
+                _queue == nullptr ||
+                !_queue->Receive(&record) ||
                 record.ThreadPointer == nullptr
             ) {
                 continue;
@@ -109,30 +99,13 @@ namespace Threads {
 
             record.ThreadPointer->_dispatchTermination();
 
-            /*
-             * _dispatchTermination() has now deleted the native task and
-             * completed all callbacks that may legally dereference the Thread.
-             * From this point forward only the value snapshot is safe: manager
-             * cleanup may delete ReleaseOnTerminate objects immediately.
-             *
-             * Always ask ThreadManager to perform a cleanup pass here rather
-             * than consulting record.Snapshot.FreeOnTerminate. OnTerminated is
-             * intentionally allowed to change FreeOnTerminate, so eligibility
-             * must be resolved from the post-callback object state by
-             * ThreadManager::TryClaimAutomaticCleanup().
-             *
-             * ThreadManager already owns the difficult reclamation semantics.
-             * If a manager iteration is active it marks cleanup pending and
-             * the final IterationGuard performs deletion later; otherwise it
-             * atomically claims, unregisters and deletes eligible Threads here.
-             */
             try {
                 ThreadManager::GetInstance()->CleanUpWithResult();
             } catch (...) {
                 /*
                  * Reclamation failure must never terminate this permanent
-                 * infrastructure task. Eligible objects remain manager-owned
-                 * and can be reclaimed by a later cleanup pass.
+                 * infrastructure execution context. Eligible objects remain
+                 * manager-owned and can be reclaimed by a later cleanup pass.
                  */
             }
 
@@ -140,41 +113,36 @@ namespace Threads {
         }
     }
 
-
     ThreadTerminationDispatcher*
     ThreadTerminationDispatcher::GetInstance() {
         static ThreadTerminationDispatcher instance;
         return &instance;
     }
 
-
     bool ThreadTerminationDispatcher::IsAvailable() const {
         std::lock_guard<std::mutex> lock(_initializationMutex);
-        return _queue != nullptr && _taskHandle != nullptr;
+        return _queue != nullptr &&
+            _taskHandle != System::Execution::InvalidExecutionHandle;
     }
-
 
     bool ThreadTerminationDispatcher::EnsureAvailable() {
         return _initialize();
     }
 
-
     bool ThreadTerminationDispatcher::IsCurrentTask() const {
         std::lock_guard<std::mutex> lock(_initializationMutex);
         return
-            _taskHandle != nullptr &&
+            _taskHandle != System::Execution::InvalidExecutionHandle &&
             Task::TaskRuntime::Current() == _taskHandle;
     }
 
-
     uint32_t ThreadTerminationDispatcher::GetMinimumFreeStackBytes() const {
         std::lock_guard<std::mutex> lock(_initializationMutex);
-        if (_taskHandle == nullptr) {
+        if (_taskHandle == System::Execution::InvalidExecutionHandle) {
             return 0;
         }
         return Task::TaskRuntime::MinimumFreeStack(_taskHandle);
     }
-
 
     bool ThreadTerminationDispatcher::Dispatch(Thread* thread) {
         if (thread == nullptr) {
@@ -185,22 +153,22 @@ namespace Threads {
             return false;
         }
 
-        QueueHandle_t queue = nullptr;
-        {
-            std::lock_guard<std::mutex> lock(_initializationMutex);
-            queue = _queue;
-        }
-
-        if (queue == nullptr) {
-            return false;
-        }
-
         DispatchRecord record;
         record.ThreadPointer = thread;
         record.Snapshot = SnapshotThread(thread);
 
-        const bool queued =
-            xQueueSend(queue, &record, portMAX_DELAY) == pdTRUE;
+        System::PlatformResult queued = System::PlatformResult::Failed(
+            System::PlatformStatus::Unavailable
+        );
+        {
+            std::lock_guard<std::mutex> lock(_initializationMutex);
+            if (_queue != nullptr) {
+                queued = _queue->Send(
+                    &record,
+                    System::Synchronization::WaitForever
+                );
+            }
+        }
 
         if (queued) {
             _observable->Queued(record.Snapshot);
@@ -208,7 +176,7 @@ namespace Threads {
             _observable->QueueFailed(record.Snapshot);
         }
 
-        return queued;
+        return static_cast<bool>(queued);
     }
 
 }
