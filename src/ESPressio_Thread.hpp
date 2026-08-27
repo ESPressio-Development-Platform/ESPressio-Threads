@@ -651,11 +651,14 @@ public:
     ThreadInitializationStatus Initialize() override {
         const ThreadInitializationStatus status = _initialize();
         if (status != ThreadInitializationStatus::Success) {
-            TOnThreadInitializationFailedEvent onInitializationFailed =
-                GetOnInitializationFailed();
+            StableCallback<TOnThreadInitializationFailedEvent> onInitializationFailed;
+            {
+                std::lock_guard<std::mutex> lock(_callbackMutex);
+                onInitializationFailed = _onInitializationFailed;
+            }
             if (onInitializationFailed != nullptr) {
                 try {
-                    onInitializationFailed(this, status);
+                    (*onInitializationFailed)(this, status);
                 } catch (...) {
                 }
             }
