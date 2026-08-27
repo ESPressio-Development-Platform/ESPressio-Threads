@@ -1,7 +1,7 @@
 {
     "name": "ESPressio-Threads",
-    "description": "Threading library for single- and multi-core ESP32 microcontrollers",
-    "keywords": "thread,threads,threading,esp,esp32,espressif,multi-threading,multi-core",
+    "description": "Portable long-lived thread lifecycle and precision scheduling for the ESPressio Development Platform",
+    "keywords": "thread,threads,threading,scheduling,precision,lifecycle,multi-core,platform-neutral,espressio",
     "homepage": "https://espressio.org",
     "authors": {
         "name": "Simon J. Stuart",
@@ -18,8 +18,8 @@
     },
     "version": "3.1.7",
     "license": "Apache-2.0",
-    "frameworks": ["arduino"],
-    "platforms": ["espressif32"],
+    "frameworks": "*",
+    "platforms": "*",
     "dependencies": [
         {
             "name": "ESPressio-System",
