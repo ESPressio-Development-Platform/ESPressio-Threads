@@ -17,17 +17,16 @@ jobs:
           grep -q 'Task::TaskRuntime::Delete' src/ESPressio_Thread.hpp
           grep -q 'Task::TaskRuntime::Current' src/ESPressio_Thread.hpp
           grep -q 'Task::TaskRuntime::Suspend' src/ESPressio_Thread.hpp
-          grep -q 'ulTaskNotifyTake' src/ESPressio_Thread.hpp
-          grep -q 'xTaskNotifyGive' src/ESPressio_Thread.hpp
+          grep -q '<ESPressio_Synchronization.hpp>' src/ESPressio_Thread.hpp
 
           grep -q '<ESPressio_Task.hpp>' src/ESPressio_ThreadTerminationDispatcher.cpp
           grep -q 'Task::TaskRuntime::Create' src/ESPressio_ThreadTerminationDispatcher.cpp
           grep -q 'Task::TaskRuntime::Delete' src/ESPressio_ThreadTerminationDispatcher.cpp
           grep -q 'Task::TaskRuntime::Current' src/ESPressio_ThreadTerminationDispatcher.cpp
 
-          # Automatic ReleaseOnTerminate reclamation now belongs to the
-          # existing termination dispatcher + ThreadManager path. A separate
-          # garbage-collector task must not return.
+          # Automatic ReleaseOnTerminate reclamation belongs to the existing
+          # termination dispatcher + ThreadManager path. A separate garbage
+          # collector task must not return.
           grep -q 'ThreadManager::GetInstance()->CleanUpWithResult' src/ESPressio_ThreadTerminationDispatcher.cpp
           if find src -maxdepth 1 -type f -name '*GarbageCollector*' | grep -q .; then
             echo 'Dedicated Thread garbage collector API/task was reintroduced.' >&2
@@ -38,17 +37,14 @@ jobs:
             exit 1
           fi
 
-          if grep -E 'xTaskCreate(PinnedToCore)?|vTaskDelete|xTaskGetCurrentTaskHandle|vTaskSuspend' src/ESPressio_Thread.hpp; then
-            echo 'Primary Thread regressed to direct FreeRTOS task ownership.' >&2
-            exit 1
-          fi
-          if grep -E 'xTaskCreate(PinnedToCore)?|vTaskDelete' src/ESPressio_ThreadTerminationDispatcher.cpp; then
-            echo 'Termination dispatcher regressed to direct FreeRTOS task ownership.' >&2
+          if grep -E 'freertos/|TaskHandle_t|BaseType_t|UBaseType_t|xTaskCreate(PinnedToCore)?|vTaskDelete|xTaskGetCurrentTaskHandle|vTaskSuspend|ulTaskNotifyTake|xTaskNotifyGive|portNUM_PROCESSORS|configNUMBER_OF_CORES' src/ESPressio_Thread.hpp src/ESPressio_ThreadManager.hpp src/ESPressio_ThreadTerminationDispatcher.cpp; then
+            echo 'Threads regressed to direct FreeRTOS runtime ownership.' >&2
             exit 1
           fi
 
           grep -q 'ESPressio-Task' library.json
           grep -q 'feature/1-task-execution' library.json
+          grep -q 'feature/29-platform-clock-abstractions' library.json
 
   esp32-task-runtime-compile:
     runs-on: ubuntu-latest
@@ -58,29 +54,29 @@ jobs:
           path: project/ESPressio-Threads
       - uses: actions/checkout@v4
         with:
+          repository: ESPressio-Development-Platform/ESPressio-System
+          ref: feature/1-system-memory-policy
+          path: project/dependencies/ESPressio-System
+      - uses: actions/checkout@v4
+        with:
           repository: ESPressio-Development-Platform/ESPressio-Task
           ref: feature/1-task-execution
           path: project/dependencies/ESPressio-Task
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Observable
-          ref: 3.0.2
+          ref: feature/16-rtti-free-observer-registry
           path: project/dependencies/ESPressio-Observable
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Timing
-          ref: 2.2.8
+          ref: feature/29-platform-clock-abstractions
           path: project/dependencies/ESPressio-Timing
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Units
-          ref: 0.2.7
+          ref: main
           path: project/dependencies/ESPressio-Units
-      - uses: actions/checkout@v4
-        with:
-          repository: ESPressio-Development-Platform/ESPressio-Serializable
-          ref: 0.11.3
-          path: project/dependencies/ESPressio-Serializable
       - uses: actions/setup-python@v5
         with:
           python-version: '3.x'
@@ -98,8 +94,8 @@ jobs:
           build_unflags = -std=gnu++11 -fno-rtti
           lib_ldf_mode = deep+
           lib_deps =
+              ../dependencies/ESPressio-System
               ../dependencies/ESPressio-Observable
-              ../dependencies/ESPressio-Serializable
               ../dependencies/ESPressio-Units
               ../dependencies/ESPressio-Timing
               ../dependencies/ESPressio-Task
@@ -132,8 +128,6 @@ jobs:
               probe.Start();
               probe.Terminate();
 
-              // Compile the automatic-release construction path as part of the
-              // same coordinated Task-backed lifecycle surface.
               auto* automatic = new ProbeThread(ThreadReleasePolicy::ReleaseOnTerminate);
               (void)automatic->Initialize();
               automatic->Start();
@@ -142,5 +136,15 @@ jobs:
 
           void loop() { delay(1000); }
           EOF
-      - name: Compile Task-backed Threads infrastructure
-        run: pio run -d project/compile
+      - name: Compile System-backed Threads infrastructure
+        shell: bash
+        run: |
+          set -o pipefail
+          pio run -d project/compile 2>&1 | tee threads-runtime-build.log
+      - name: Upload compiler log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: threads-runtime-build-log
+          path: threads-runtime-build.log
+          if-no-files-found: warn
