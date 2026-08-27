@@ -3,13 +3,15 @@
 #include "ESPressio_ThreadTerminationDispatcher.hpp"
 
 #include <ESPressio_Memory.hpp>
+#include <ESPressio_Synchronization.hpp>
 
 namespace ESPressio {
 
     namespace Threads {
-        // Define the Constructor and Destructor of `Thread` here
         Thread::Thread() : _threadID(0) {
             try {
+                _taskExited = System::Synchronization::CreateBinarySignal();
+                _taskStartGate = System::Synchronization::CreateBinarySignal();
                 _lifecycleObservable =
                     System::Memory::MakeShared<
                         LifecycleObservable,
@@ -26,15 +28,12 @@ namespace ESPressio {
                 } catch (...) {
                     // Preserve the original construction failure.
                 }
-
-                if (_taskExited != nullptr) {
-                    vSemaphoreDelete(_taskExited);
-                    _taskExited = nullptr;
-                }
-
+                _taskStartGate.reset();
+                _taskExited.reset();
                 std::rethrow_exception(constructionFailure);
             }
         }
+
         Thread::~Thread() {
             SetFreeOnTerminate(false);
             _waitForTerminationDispatch();
@@ -53,20 +52,12 @@ namespace ESPressio {
                 }
             }
             _deleteTask();
-            if (_taskExited != nullptr) {
-                vSemaphoreDelete(_taskExited);
-                _taskExited = nullptr;
-            }
+            _taskStartGate.reset();
+            _taskExited.reset();
             ThreadManager::GetInstance()->RemoveThread(this);
         }
 
         void Thread::_requestGarbageCollection() {
-            /*
-             * Compatibility shim for the historical Thread::GarbageCollect()
-             * API. Automatic reclamation no longer owns a dedicated worker;
-             * ThreadManager contains the actual claim/remove/delete semantics
-             * and already defers cleanup while a manager iteration is active.
-             */
             ThreadManager::GetInstance()->CleanUp();
         }
 
@@ -77,22 +68,16 @@ namespace ESPressio {
         bool Thread::_isCurrentTerminationDispatcherTask() {
             return ThreadTerminationDispatcher::GetInstance()->IsCurrentTask();
         }
+
         bool Thread::_queueTerminationDispatch(Thread* thread) {
             return ThreadTerminationDispatcher::GetInstance()->Dispatch(thread);
         }
 
         void Thread::_dispatchTermination() {
-            /*
-             * Normal task exit leaves the ESPressio-owned task suspended.
-             * The dispatcher is the sole context that deletes that task,
-             * ensuring no Thread object can be reclaimed while its own
-             * FreeRTOS stack is still executing.
-             */
             _deleteTask();
 
             const bool terminated =
                 GetThreadState() == ThreadState::Terminated;
-            const SemaphoreHandle_t taskExited = _taskExited;
             StableCallback<TOnThreadEvent> onTerminated;
             {
                 std::lock_guard<std::mutex> lock(_callbackMutex);
@@ -113,17 +98,10 @@ namespace ESPressio {
                 }
             }
 
-            if (taskExited != nullptr) {
-                xSemaphoreGive(taskExited);
+            if (_taskExited != nullptr) {
+                (void)_taskExited->Give();
             }
 
-            /*
-             * The dispatcher performs manager-owned automatic reclamation only
-             * after this method returns. Clearing the pending flag here lets
-             * explicitly-owned Thread destructors complete once their native
-             * task has been deleted, while ReleaseOnTerminate objects remain
-             * manager-owned until the dispatcher's cleanup pass claims them.
-             */
             _terminationDispatchPending.store(false, std::memory_order_release);
         }
 
