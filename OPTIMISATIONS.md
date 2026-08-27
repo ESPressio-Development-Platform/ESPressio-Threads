@@ -185,3 +185,20 @@ Once the previous GC path would have initialized, the new architecture permanent
 
 ### Validation
 The Task-runtime CI guard now rejects reintroduction of any `*GarbageCollector*` source file, requires dispatcher-to-manager cleanup, and compiles both explicit-release and automatic-release Thread construction/lifecycle paths against the Task working branch.
+
+## 2026-08-27 — System-backed ThreadManager registry and snapshots (#75)
+
+Phase 7 of the coordinated memory-policy programme moves ESPressio-owned ThreadManager bookkeeping away from scarce internal RAM while preserving the RTOS ownership boundary.
+
+### Changes
+- the variable-size ThreadManager registry now uses ESPressio-System `ExternalPreferred` storage;
+- `ForEachThread`, initialization and cleanup lock-boundary snapshots use external-preferred storage rather than the default heap;
+- cleanup claim bookkeeping uses external-preferred storage and the complete ThreadRecord snapshot is released once cleanup claims have been resolved;
+- `library.json` resolves ESPressio-System directly from `feature/1-system-memory-policy` during coordinated validation.
+
+### Deliberately unchanged
+FreeRTOS task stacks, queues, task-control structures and other RTOS/native synchronization storage remain internal. Snapshots are retained where required to avoid holding manager locks across virtual/user code; their placement and lifetime were changed rather than weakening that concurrency boundary.
+
+### Commits
+- `f1c2033` — `optimise(#75): externalise ThreadManager registry and snapshots`
+- `00b3351` — working-branch System dependency metadata
