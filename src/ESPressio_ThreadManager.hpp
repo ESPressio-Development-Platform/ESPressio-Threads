@@ -22,11 +22,16 @@
 namespace ESPressio {
 namespace Threads {
 
+/// <summary>Captures the initialization outcome for one registered thread.</summary>
 struct ThreadInitializationResult {
+    /// <summary>Identifier of the thread that was initialized.</summary>
     uint8_t threadID;
+    /// <summary>Status returned by the thread's initialization attempt.</summary>
     ThreadInitializationStatus status;
 };
 
+/// <summary>Owns the registry and lifecycle coordination for ESPressio threads.</summary>
+/// <remarks>The manager assigns cores, initializes registered threads, coordinates automatic cleanup, and publishes manager-level lifecycle observations.</remarks>
 class ThreadManager {
 private:
     class ManagerObservable final : public Observable::ThreadSafeObservable {
@@ -160,6 +165,7 @@ private:
     }
 
 protected:
+    /// <summary>Constructs the singleton manager and its externally preferred registry storage.</summary>
     ThreadManager()
         : _threads(ThreadRecordStorage{}),
           _observable(System::Memory::MakeShared<
@@ -168,6 +174,7 @@ protected:
           >()) {}
 
 public:
+    /// <summary>Returns the process-wide thread manager singleton.</summary>
     static ThreadManager* GetInstance() {
         // Manager/control state remains in normal/internal memory; only its
         // variable-size registry and snapshots use ExternalPreferred storage.
@@ -175,6 +182,11 @@ public:
         return instance;
     }
 
+    /// <summary>Registers a thread and assigns it to a processor core.</summary>
+    /// <param name="thread">Thread instance to register.</param>
+    /// <param name="assignedThreadID">Optional output receiving an automatically allocated thread identifier.</param>
+    /// <returns>The processor core assigned to the thread.</returns>
+    /// <remarks>If no identifier output is supplied, the thread's existing identifier must be unique. Registration failures are observed and then rethrown.</remarks>
     int AddThread(IThread* thread, uint8_t* assignedThreadID = nullptr) {
         try {
             if (thread == nullptr) throw ThreadInvalidRegistrationException();
@@ -255,6 +267,7 @@ public:
         }
     }
 
+    /// <summary>Removes the specified thread instance from the registry without deleting it.</summary>
     void RemoveThread(IThread* thread) {
         bool removed = false;
         ThreadRecord removedRecord{0, nullptr, 0};
@@ -271,6 +284,7 @@ public:
         if (removed) _observable->ThreadRemoved(_snapshot(removedRecord));
     }
 
+    /// <summary>Removes the thread with the specified identifier from the registry without deleting it.</summary>
     void RemoveThread(uint8_t threadID) {
         bool removed = false;
         ThreadRecord removedRecord{0, nullptr, 0};
@@ -287,6 +301,7 @@ public:
         if (removed) _observable->ThreadRemoved(_snapshot(removedRecord));
     }
 
+    /// <summary>Invokes a callback for a stable snapshot of all currently registered threads.</summary>
     void ForEachThread(const std::function<void(IThread*)>& callback) {
         IterationGuard iteration(*this);
         ThreadPointerSnapshot snapshot;
@@ -297,6 +312,8 @@ public:
         for (IThread* thread : snapshot) callback(thread);
     }
 
+    /// <summary>Invokes a callback for the thread with the requested identifier when present.</summary>
+    /// <returns><c>true</c> when a matching thread was found and the callback was invoked.</returns>
     bool WithThread(uint8_t threadID, const std::function<void(IThread*)>& callback) {
         IterationGuard iteration(*this);
         IThread* result = nullptr;
@@ -310,6 +327,7 @@ public:
         return true;
     }
 
+    /// <summary>Returns the registered thread with the requested identifier, or <c>nullptr</c> when absent.</summary>
     IThread* GetThread(uint8_t threadID) {
         IThread* result = nullptr;
         _threads.WithSharedReadLock([&](const auto& threads) {
@@ -320,6 +338,9 @@ public:
         return result;
     }
 
+    /// <summary>Claims and deletes terminated threads that opted into automatic cleanup.</summary>
+    /// <returns>Detailed cleanup counts and deferral information.</returns>
+    /// <remarks>Cleanup is deferred while a manager iteration snapshot is active.</remarks>
     ThreadManagerCleanupResult CleanUpWithResult() {
         ThreadManagerCleanupResult result;
         ThreadRecordStorage snapshot;
@@ -393,8 +414,11 @@ public:
         }
     }
 
+    /// <summary>Runs automatic cleanup and discards the detailed result.</summary>
     void CleanUp() { static_cast<void>(CleanUpWithResult()); }
 
+    /// <summary>Initializes a snapshot of all registered threads.</summary>
+    /// <returns>One initialization result for each thread examined.</returns>
     std::vector<ThreadInitializationResult> InitializeWithResults() {
         IterationGuard iteration(*this);
         InitializationTargetStorage snapshot;
@@ -425,16 +449,20 @@ public:
         return results;
     }
 
+    /// <summary>Initializes all registered threads and discards individual results.</summary>
     void Initialize() { static_cast<void>(InitializeWithResults()); }
 
+    /// <summary>Registers an observer for manager-level lifecycle notifications.</summary>
     Observable::ObserverHandlePtr RegisterObserver(IThreadManagerObserver* observer) {
         return _observable->RegisterObserver(observer);
     }
 
+    /// <summary>Unregisters a manager observer.</summary>
     void UnregisterObserver(IThreadManagerObserver* observer) {
         _observable->UnregisterObserver(observer);
     }
 
+    /// <summary>Returns the number of currently registered threads.</summary>
     std::size_t GetThreadCount() {
         std::size_t result = 0;
         _threads.WithSharedReadLock([&](const auto& threads) { result = threads.size(); });
