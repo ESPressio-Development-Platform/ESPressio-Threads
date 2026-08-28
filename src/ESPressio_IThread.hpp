@@ -12,6 +12,7 @@ namespace ESPressio {
 
     namespace Threads {
 
+        /// <summary>Lifecycle state of an ESPressio thread.</summary>
         enum ThreadState {
             Uninitialized,
             Initialized,
@@ -21,6 +22,7 @@ namespace ESPressio {
             Terminated,
             Destroyed
         };
+        /// <summary>Detailed outcome returned when initializing or starting a thread task.</summary>
         enum class ThreadInitializationStatus : uint8_t {
             Success,
             AlreadyInitialized,
@@ -33,6 +35,7 @@ namespace ESPressio {
             TerminatedDuringInitialization,
             InitializationException
         };
+        /// <summary>Base exception for ESPressio Threads lifecycle and execution failures.</summary>
         class ThreadException : public std::runtime_error {
             public:
                 explicit ThreadException(const char* message)
@@ -41,6 +44,7 @@ namespace ESPressio {
                 explicit ThreadException(const std::string& message)
                     : std::runtime_error(message) {}
         };
+        /// <summary>Base exception for thread registration failures.</summary>
         class ThreadRegistrationException : public ThreadException {
             public:
                 explicit ThreadRegistrationException(const char* message)
@@ -50,6 +54,7 @@ namespace ESPressio {
                     const std::string& message
                 ) : ThreadException(message) {}
         };
+        /// <summary>Indicates that a requested thread identifier is already registered.</summary>
         class ThreadDuplicateIDException :
             public ThreadRegistrationException {
             private:
@@ -62,11 +67,13 @@ namespace ESPressio {
                         " is already registered"
                     ),
                     _threadID(threadID) {}
+                /// <summary>Returns the conflicting thread identifier.</summary>
                 uint8_t GetThreadID() const noexcept {
                     return _threadID;
                 }
         };
 
+        /// <summary>Indicates an attempt to register a null thread pointer.</summary>
         class ThreadInvalidRegistrationException :
             public ThreadRegistrationException {
             public:
@@ -75,6 +82,7 @@ namespace ESPressio {
                         "Cannot register a null Thread pointer"
                     ) {}
         };
+        /// <summary>Indicates that the maximum number of registered thread identifiers has been exhausted.</summary>
         class ThreadLimitExceededException :
             public ThreadRegistrationException {
             public:
@@ -84,6 +92,7 @@ namespace ESPressio {
                     ) {}
         };
 
+        /// <summary>Wraps an exception escaping a thread's <c>OnLoop()</c> execution.</summary>
         class ThreadExecutionException : public ThreadException {
             private:
                 std::exception_ptr _cause;
@@ -93,31 +102,34 @@ namespace ESPressio {
                 ) : ThreadException("Thread OnLoop execution failed"),
                     _cause(std::move(cause)) {}
 
+                /// <summary>Returns the captured underlying exception.</summary>
                 const std::exception_ptr& GetCause() const noexcept {
                     return _cause;
                 }
+                /// <summary>Rethrows the captured underlying exception when present.</summary>
                 void RethrowCause() const {
                     if (_cause != nullptr) {
                         std::rethrow_exception(_cause);
                     }
                 }
         };
-        /*
-            `IThread` is a common Interface for all Thread Types provided by this library.
-            You can use it to reference any Thread Type without knowing the actual type.
-        */
+        /// <summary>Common lifecycle, configuration, and callback contract implemented by all ESPressio thread types.</summary>
         class IThread  {
             private:
                 std::atomic<bool> _automaticCleanupClaimed{false};
 
             public:
             // Type Defs
+                /// <summary>Callback receiving the thread responsible for a lifecycle notification.</summary>
                 typedef std::function<void(IThread*)> ThreadCallback;
+                /// <summary>Callback receiving a thread and its previous and new lifecycle states.</summary>
                 typedef std::function<void(IThread*, ThreadState, ThreadState)> ThreadStateChangeCallback;
+                /// <summary>Callback receiving a thread whose initialization failed and its detailed status.</summary>
                 typedef std::function<void(
                     IThread*,
                     ThreadInitializationStatus
                 )> ThreadInitializationFailedCallback;
+                /// <summary>Callback receiving a thread whose loop failed and the captured exception.</summary>
                 typedef std::function<void(
                     IThread*,
                     std::exception_ptr
@@ -132,22 +144,16 @@ namespace ESPressio {
                 virtual ~IThread() {}
 
             // Methods
-                /// `Initialize` is invoked automatically for all Threads when the `ThreadManager` is initialized in your `main()` (or `setup()` for MCU projects) function.
+                /// <summary>Initializes the thread's underlying execution resources without necessarily starting its loop.</summary>
                 virtual ThreadInitializationStatus Initialize() = 0;
-                /// `Terminate` is invoked automatically for all Threads when the `ThreadManager` is terminated in your `main()` (or `loop()` for MCU projects) function.
-                /// You can, however, invoke it manually to terminate a Thread at any time!
+                /// <summary>Requests termination of the thread and its underlying task lifecycle.</summary>
                 virtual void Terminate() = 0;
-                /// `Start` will start the Thread loop if it is not already running.
-                /// It will also Resume the thread if it is `Paused`.
-                /// Its return value exposes initialization failures when a new
-                /// task must be created.
+                /// <summary>Starts an initialized thread or resumes a paused thread, initializing it first when necessary.</summary>
                 virtual ThreadInitializationStatus Start() = 0;
 
-                /// `Pause` will pause the Thread loop if it is running.
+                /// <summary>Pauses loop execution when the thread is running.</summary>
                 virtual void Pause() = 0;
-                /// Atomically claims this object for manager-driven cleanup.
-                /// The default preserves compatibility for custom IThread
-                /// implementations that rely only on FreeOnTerminate.
+                /// <summary>Atomically claims an eligible thread object for manager-driven automatic cleanup.</summary>
                 virtual bool TryClaimAutomaticCleanup() {
                     if (!GetFreeOnTerminate()) {
                         return false;
@@ -163,112 +169,105 @@ namespace ESPressio {
 
             // Getters
 
-                /// `GetCoreID` returns the ID of the Core the Thread is running on.
+                /// <summary>Returns the execution core identifier assigned to the thread.</summary>
                 virtual int GetCoreID() = 0;
-                /// `GetStackSize` returns the size of the Stack the Thread is using.
+                /// <summary>Returns the configured task stack size.</summary>
                 virtual uint32_t GetStackSize() = 0;
 
-                /// `GetPriority` returns the priority of the Thread.
+                /// <summary>Returns the configured thread priority.</summary>
                 virtual unsigned int GetPriority() = 0;
 
-                /// `GetThreadID` returns the unique ID of the Thread.
+                /// <summary>Returns the thread's unique manager identifier.</summary>
                 virtual uint8_t GetThreadID() = 0;
-                /// `GetThreadState` returns the current state of the Thread.
+                /// <summary>Returns the current thread lifecycle state.</summary>
                 virtual ThreadState GetThreadState() = 0;
 
-                /// `GetFreeOnTerminate` returns whether this Thread should be freed from memory when it is terminated.
+                /// <summary>Indicates whether the manager should reclaim the thread object after termination.</summary>
                 virtual bool GetFreeOnTerminate() = 0;
 
-                /// `GetStartOnInitialize` returns whether this Thread should start running when it is initialized.
+                /// <summary>Indicates whether initialization should automatically start thread execution.</summary>
                 virtual bool GetStartOnInitialize() = 0;
             // Utility Getters
 
+                /// <summary>Indicates whether the thread is currently running.</summary>
                 bool IsRunning() { return GetThreadState() == ThreadState::Running; }
 
+                /// <summary>Indicates whether the thread is currently paused.</summary>
                 bool IsPaused() { return GetThreadState() == ThreadState::Paused; }
 
+                /// <summary>Indicates whether termination has been requested and is in progress.</summary>
                 bool IsTerminating() { return GetThreadState() == ThreadState::Terminating; }
 
+                /// <summary>Indicates whether thread execution has completed termination.</summary>
                 bool IsTerminated() { return GetThreadState() == ThreadState::Terminated; }
 
             // Callback Getters
-                /// `GetOnDestroy` returns the callback to be invoked when the Thread is destroyed.
+                /// <summary>Returns the callback invoked when the thread object is destroyed.</summary>
                 virtual ThreadCallback GetOnDestroy() = 0;
 
-                /// `GetOnInitialized` returns the callback to be invoked when the Thread is initialized.
+                /// <summary>Returns the callback invoked after successful initialization.</summary>
                 virtual ThreadCallback GetOnInitialize() = 0;
 
-                /// `GetOnStarted` returns the callback to be invoked when the Thread is started.
+                /// <summary>Returns the callback invoked when the thread starts or resumes.</summary>
                 virtual ThreadCallback GetOnStart() = 0;
-                /// `GetOnPaused` returns the callback to be invoked when the Thread is paused.
+                /// <summary>Returns the callback invoked when the thread is paused.</summary>
                 virtual ThreadCallback GetOnPause() = 0;
 
-                /// `GetOnTerminate` returns the callback invoked when the Thread loop enters the Terminated state.
+                /// <summary>Returns the callback invoked when the loop enters terminating/terminated lifecycle processing.</summary>
                 virtual ThreadCallback GetOnTerminate() = 0;
-                /// `GetOnTerminated` returns the callback invoked after the underlying task has completed termination.
-                /// The default implementation preserves compatibility with existing IThread implementations.
+                /// <summary>Returns the callback invoked after the underlying task has fully completed termination.</summary>
                 virtual ThreadCallback GetOnTerminated() { return nullptr; }
-                /// Returns the callback invoked when Initialize() returns an
-                /// outcome other than Success.
+                /// <summary>Returns the callback invoked when initialization does not succeed.</summary>
                 virtual ThreadInitializationFailedCallback
                 GetOnInitializationFailed() { return nullptr; }
 
-                /// Returns the callback invoked when OnLoop() throws. The
-                /// exception_ptr contains a ThreadExecutionException.
+                /// <summary>Returns the callback invoked when thread loop execution throws.</summary>
                 virtual ThreadExecutionFailedCallback
                 GetOnExecutionFailed() { return nullptr; }
-                /// `GetOnStateChange` returns the callback to be invoked when the Thread's state changes.
+                /// <summary>Returns the callback invoked on lifecycle state transitions.</summary>
                 virtual ThreadStateChangeCallback GetOnStateChange() = 0;
 
             // Setters
 
-                /// `SetCoreID` sets the ID of the Core the Thread should run on.
+                /// <summary>Sets the execution core affinity requested for the thread.</summary>
                 virtual void SetCoreID(int value) = 0;
 
-                /// `SetStackSize` sets the size of the Stack the Thread should use.
+                /// <summary>Sets the task stack size used for thread execution.</summary>
                 virtual void SetStackSize(uint32_t value) = 0;
-                /// `SetPriority` sets the priority of the Thread.
+                /// <summary>Sets the task priority used for thread execution.</summary>
                 virtual void SetPriority(unsigned int value) = 0;
 
-                /// `SetFreeOnTerminate` defines whether this Thread should be freed from memory when it is terminated.
+                /// <summary>Sets whether the manager may reclaim the thread object after termination.</summary>
                 virtual void SetFreeOnTerminate(bool value) = 0;
 
-                /// `SetStartOnInitialize` defines whether this Thread should start running when it is initialized.
+                /// <summary>Sets whether thread execution starts automatically after initialization.</summary>
                 virtual void SetStartOnInitialize(bool value) = 0;
             // Callback Setters
 
-                /// `SetOnDestroy` sets the callback to be invoked when the Thread is destroyed.
-                /// The callback function takes `IThread*` and ideally named `sender`.
+                /// <summary>Sets the callback invoked when the thread object is destroyed.</summary>
                 virtual void SetOnDestroy(ThreadCallback) = 0;
-                /// `SetOnInitialized` sets the callback to be invoked when the Thread is initialized.
-                /// The callback function takes `IThread*` and ideally named `sender`.
+                /// <summary>Sets the callback invoked after successful initialization.</summary>
                 virtual void SetOnInitialize(ThreadCallback) = 0;
 
-                /// `SetOnStarted` sets the callback to be invoked when the Thread is started.
-                /// The callback function takes `IThread*` and ideally named `sender`.
+                /// <summary>Sets the callback invoked when the thread starts or resumes.</summary>
                 virtual void SetOnStart(ThreadCallback) = 0;
-                /// `SetOnPaused` sets the callback to be invoked when the Thread is paused.
-                /// The callback function takes `IThread*` and ideally named `sender`.
+                /// <summary>Sets the callback invoked when the thread is paused.</summary>
                 virtual void SetOnPause(ThreadCallback) = 0;
 
-                /// `SetOnTerminate` sets the callback invoked when the Thread loop enters the Terminated state.
-                /// The callback function takes `IThread*` and ideally named `sender`.
+                /// <summary>Sets the callback invoked as loop termination begins.</summary>
                 virtual void SetOnTerminate(ThreadCallback) = 0;
-                /// `SetOnTerminated` sets the callback invoked after the underlying task has completed termination.
-                /// The default implementation preserves compatibility with existing IThread implementations.
+                /// <summary>Sets the callback invoked after the underlying task has completed termination.</summary>
                 virtual void SetOnTerminated(ThreadCallback) {}
-                /// Sets the callback invoked when Initialize() returns an
-                /// outcome other than Success.
+                /// <summary>Sets the callback invoked when initialization does not succeed.</summary>
                 virtual void SetOnInitializationFailed(
                     ThreadInitializationFailedCallback
                 ) {}
 
-                /// Sets the callback invoked when OnLoop() throws.
+                /// <summary>Sets the callback invoked when thread loop execution throws.</summary>
                 virtual void SetOnExecutionFailed(
                     ThreadExecutionFailedCallback
                 ) {}
-                /// `SetOnStateChange` sets the callback to be invoked when the Thread's state changes.
-                /// The callback function takes `IThread*` and ideally named `sender`, `ThreadState` for the previous state and `ThreadState` for the new state.
+                /// <summary>Sets the callback invoked whenever the thread lifecycle state changes.</summary>
                 virtual void SetOnStateChange(ThreadStateChangeCallback) = 0;
         };
 
