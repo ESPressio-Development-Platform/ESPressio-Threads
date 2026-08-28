@@ -23,11 +23,17 @@
 namespace ESPressio {
 namespace Threads {
 
+    /// <summary>Selects how PrecisionThread calculates the delta supplied to each iteration.</summary>
     enum class IterationDeltaMode : uint8_t {
+        /// <summary>Measures from the previous iteration start to the current iteration start.</summary>
         StartToStart,
+        /// <summary>Measures from the previous iteration end to the current iteration start.</summary>
         EndToStart
     };
 
+    /// <summary>Thread base class that executes work against a clock-driven iteration schedule with timing telemetry.</summary>
+    /// <typeparam name="TTime">Public time representation used by the scheduler.</typeparam>
+    /// <typeparam name="TRepresentationTraits">Traits used to construct frequency and signed-time results.</typeparam>
     template<typename TTime, typename TRepresentationTraits>
     class PrecisionThread : public Thread {
     public:
@@ -165,19 +171,26 @@ namespace Threads {
         }
 
     protected:
+        /// <summary>Handles a scheduler wake requested independently of the periodic iteration schedule.</summary>
         virtual void OnWorkWake() {}
 
+        /// <summary>Wakes the scheduler so <see cref="OnWorkWake"/> can run promptly.</summary>
         void WakeForWork() {
             _workWakeRequested.store(true);
             _signalScheduler();
         }
 
+        /// <summary>Executes one scheduled precision-thread iteration.</summary>
+        /// <param name="delta">Configured delta measurement for this iteration.</param>
+        /// <param name="startTime">Clock time at which the iteration began.</param>
+        /// <param name="skippedIterations">Number of schedule periods skipped because execution was behind.</param>
         virtual void Iterate(
             IterationTime delta,
             IterationTime startTime,
             SkippedIterationCount skippedIterations
         ) = 0;
 
+        /// <summary>Implements the clock-driven scheduling loop used by the underlying Thread task.</summary>
         void OnLoop() final override {
             if (_workWakeRequested.exchange(false)) {
                 OnWorkWake();
@@ -265,6 +278,7 @@ namespace Threads {
         }
 
     public:
+        /// <summary>Constructs a precision thread using the supplied clock or the default Timing system clock.</summary>
         explicit PrecisionThread(ClockType* clock = nullptr)
             : _clock(
                 clock == nullptr
@@ -273,6 +287,7 @@ namespace Threads {
               ),
               _scheduleSignal(System::Synchronization::CreateBinarySignal()) {}
 
+        /// <summary>Constructs a precision thread with an explicit release policy and optional clock.</summary>
         PrecisionThread(
             ThreadReleasePolicy releasePolicy,
             ClockType* clock = nullptr
@@ -290,11 +305,13 @@ namespace Threads {
             _scheduleSignal.reset();
         }
 
+        /// <summary>Resets scheduler state before initializing the underlying thread.</summary>
         ThreadInitializationStatus Initialize() override {
             _resetSchedule();
             return Thread::Initialize();
         }
 
+        /// <summary>Starts or resumes execution and wakes the scheduler.</summary>
         ThreadInitializationStatus Start() override {
             if (GetThreadState() == ThreadState::Paused) _resetSchedule();
             const ThreadInitializationStatus status = Thread::Start();
@@ -302,16 +319,19 @@ namespace Threads {
             return status;
         }
 
+        /// <summary>Pauses execution and resets schedule measurements.</summary>
         void Pause() override {
             Thread::Pause();
             _resetSchedule();
         }
 
+        /// <summary>Requests termination and wakes any waiting scheduler.</summary>
         void Terminate() override {
             Thread::Terminate();
             _signalScheduler();
         }
 
+        /// <summary>Advances the next scheduled iteration to the current clock time and wakes the scheduler.</summary>
         void Bump() {
             const uint64_t now = _getNowNanoseconds();
             {
@@ -322,25 +342,30 @@ namespace Threads {
             _signalScheduler();
         }
 
+        /// <summary>Registers an observer for completed precision-thread iterations.</summary>
         Observable::ObserverHandlePtr RegisterIterationObserver(
             IPrecisionThreadObserver<TTime, TRepresentationTraits>* observer
         ) {
             return _iterationObservable->RegisterObserver(observer);
         }
 
+        /// <summary>Unregisters an iteration observer.</summary>
         void UnregisterIterationObserver(
             IPrecisionThreadObserver<TTime, TRepresentationTraits>* observer
         ) {
             _iterationObservable->UnregisterObserver(observer);
         }
 
+        /// <summary>Returns the clock used to schedule and measure iterations.</summary>
         ClockType* GetClock() const { return _clock; }
 
+        /// <summary>Returns the current iteration delta measurement mode.</summary>
         IterationDeltaMode GetIterationDeltaMode() const {
             std::lock_guard<std::mutex> lock(_timingMutex);
             return _deltaMode;
         }
 
+        /// <summary>Sets the iteration delta measurement mode and resets accumulated measurements when changed.</summary>
         void SetIterationDeltaMode(IterationDeltaMode mode) {
             std::lock_guard<std::mutex> lock(_timingMutex);
             if (_deltaMode != mode) {
@@ -349,11 +374,13 @@ namespace Threads {
             }
         }
 
+        /// <summary>Returns the actual scheduler period between iteration starts.</summary>
         IterationTime GetIterationPeriod() const {
             std::lock_guard<std::mutex> lock(_timingMutex);
             return _fromNanoseconds(_iterationPeriodNanoseconds);
         }
 
+        /// <summary>Sets the actual scheduler period between iteration starts.</summary>
         void SetIterationPeriod(IterationTime period) {
             const uint64_t nanoseconds = _toNanoseconds(period);
             {
@@ -371,6 +398,7 @@ namespace Threads {
             _signalScheduler();
         }
 
+        /// <summary>Sets the scheduler period from an ESPressio Time value.</summary>
         template<typename TValue, Units::UnitOrderOfMagnitude TMagnitude>
         void SetIterationPeriod(const Units::Time<TValue, TMagnitude>& period) {
             static_assert(
@@ -386,11 +414,13 @@ namespace Threads {
             );
         }
 
+        /// <summary>Returns the desired execution budget used to calculate available iteration time.</summary>
         IterationTime GetDesiredIterationPeriod() const {
             std::lock_guard<std::mutex> lock(_timingMutex);
             return _fromNanoseconds(_desiredIterationPeriodNanoseconds);
         }
 
+        /// <summary>Sets the desired execution budget, clamped to at least the scheduler period when both are nonzero.</summary>
         void SetDesiredIterationPeriod(IterationTime period) {
             uint64_t nanoseconds = _toNanoseconds(period);
             std::lock_guard<std::mutex> lock(_timingMutex);
@@ -404,6 +434,7 @@ namespace Threads {
             _desiredIterationPeriodNanoseconds = nanoseconds;
         }
 
+        /// <summary>Sets the desired execution budget from an ESPressio Time value.</summary>
         template<typename TValue, Units::UnitOrderOfMagnitude TMagnitude>
         void SetDesiredIterationPeriod(const Units::Time<TValue, TMagnitude>& period) {
             static_assert(
@@ -419,11 +450,13 @@ namespace Threads {
             );
         }
 
+        /// <summary>Returns the number of start-to-start deltas retained for average-frequency measurement.</summary>
         uint32_t GetIterationSampleCount() const {
             std::lock_guard<std::mutex> lock(_timingMutex);
             return _iterationSampleCount;
         }
 
+        /// <summary>Sets the frequency sample window size and clears accumulated frequency measurements.</summary>
         void SetIterationSampleCount(uint32_t sampleCount) {
             std::lock_guard<std::mutex> lock(_timingMutex);
             _iterationSampleCount = sampleCount;
@@ -432,16 +465,19 @@ namespace Threads {
             _averageIterationFrequency = 0.0;
         }
 
+        /// <summary>Returns the frequency measured from the most recent start-to-start interval.</summary>
         IterationFrequency GetIterationFrequency() const {
             std::lock_guard<std::mutex> lock(_timingMutex);
             return RepresentationTraits::CreateIterationFrequency(_iterationFrequency);
         }
 
+        /// <summary>Returns the average iteration frequency across the configured sample window.</summary>
         IterationFrequency GetAverageIterationFrequency() const {
             std::lock_guard<std::mutex> lock(_timingMutex);
             return RepresentationTraits::CreateIterationFrequency(_averageIterationFrequency);
         }
 
+        /// <summary>Returns the remaining execution budget for the active iteration, or a negative overrun when its deadline has passed.</summary>
         SignedIterationTime GetAvailableIterationTime() const {
             const uint64_t now = _getNowNanoseconds();
             std::lock_guard<std::mutex> lock(_timingMutex);
