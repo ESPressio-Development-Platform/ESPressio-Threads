@@ -28,6 +28,8 @@ namespace Threads {
 
     class Thread;
 
+    /// <summary>Singleton task that performs thread termination outside the terminating thread's own execution context.</summary>
+    /// <remarks>Termination requests are queued and processed by a dedicated Task-backed dispatcher so task-resource teardown can occur safely.</remarks>
     class ThreadTerminationDispatcher {
 
     private:
@@ -119,14 +121,23 @@ namespace Threads {
         ThreadTerminationDispatcher(const ThreadTerminationDispatcher&) = delete;
         ThreadTerminationDispatcher& operator=(const ThreadTerminationDispatcher&) = delete;
 
+        /// <summary>Returns the process-wide termination dispatcher singleton.</summary>
         static ThreadTerminationDispatcher* GetInstance();
 
+        /// <summary>Indicates whether the dispatcher task and queue are currently available.</summary>
         bool IsAvailable() const;
+        /// <summary>Ensures dispatcher resources are initialized and reports whether they are available.</summary>
         bool EnsureAvailable();
+        /// <summary>Indicates whether the caller is currently executing on the dispatcher task.</summary>
         bool IsCurrentTask() const;
+        /// <summary>Returns the minimum free stack bytes observed for the dispatcher task, or zero when unavailable.</summary>
         uint32_t GetMinimumFreeStackBytes() const;
+        /// <summary>Queues a thread for asynchronous termination processing.</summary>
+        /// <returns><c>true</c> when the termination request was successfully queued.</returns>
         bool Dispatch(Thread* thread);
 
+        /// <summary>Registers an observer for dispatcher availability and dispatch lifecycle notifications.</summary>
+        /// <remarks>An already-available dispatcher immediately reports initialized state to a newly registered observer.</remarks>
         Observable::ObserverHandlePtr RegisterObserver(
             IThreadTerminationDispatcherObserver* observer
         ) {
@@ -142,6 +153,7 @@ namespace Threads {
             return handle;
         }
 
+        /// <summary>Unregisters a termination-dispatcher observer.</summary>
         void UnregisterObserver(
             IThreadTerminationDispatcherObserver* observer
         ) {
