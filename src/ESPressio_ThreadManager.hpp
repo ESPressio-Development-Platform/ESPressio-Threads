@@ -5,12 +5,10 @@
 #include <algorithm>
 #include <cstddef>
 #include <exception>
-#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <utility>
-#include <vector>
 
 #include <ESPressio_Execution.hpp>
 #include <ESPressio_Memory.hpp>
@@ -31,9 +29,12 @@ struct ThreadInitializationResult {
 };
 
 /// <summary>Owns the registry and lifecycle coordination for ESPressio threads.</summary>
-/// <remarks>The manager assigns cores, initializes registered threads, coordinates automatic cleanup, and publishes manager-level lifecycle observations.</remarks>
+/// <remarks>The manager assigns cores, initializes registered threads, coordinates automatic cleanup, and publishes manager-level lifecycle observations. Variable-size registry, snapshot, and result storage prefers external memory, while optional observer bookkeeping is materialized only when first requested.</remarks>
 class ThreadManager {
 private:
+    static constexpr auto ExternalPreferred =
+        System::Memory::MemoryPolicy::ExternalPreferred;
+
     class ManagerObservable final : public Observable::ThreadSafeObservable {
         template<typename TCallback>
         void NotifyObservers(TCallback&& callback) {
@@ -98,26 +99,35 @@ private:
 
     using ThreadRecordStorage = System::Memory::Vector<
         ThreadRecord,
-        System::Memory::MemoryPolicy::ExternalPreferred
+        ExternalPreferred
     >;
     using ThreadPointerSnapshot = System::Memory::Vector<
         IThread*,
-        System::Memory::MemoryPolicy::ExternalPreferred
+        ExternalPreferred
     >;
     using CleanupRecordStorage = System::Memory::Vector<
         ClaimedCleanupRecord,
-        System::Memory::MemoryPolicy::ExternalPreferred
+        ExternalPreferred
     >;
     using InitializationTargetStorage = System::Memory::Vector<
         ThreadInitializationTarget,
-        System::Memory::MemoryPolicy::ExternalPreferred
+        ExternalPreferred
     >;
 
+public:
+    /// <summary>Externally preferred owning storage returned by <c>InitializeWithResults()</c>.</summary>
+    using InitializationResultStorage = System::Memory::Vector<
+        ThreadInitializationResult,
+        ExternalPreferred
+    >;
+
+private:
     ReadWriteMutex<ThreadRecordStorage> _threads;
     ReadWriteMutex<int> _nextCoreID = ReadWriteMutex<int>(0);
     std::recursive_mutex _iterationMutex;
     std::size_t _activeIterations = 0;
     bool _cleanupPending = false;
+    mutable std::mutex _observableMutex;
     std::shared_ptr<ManagerObservable> _observable;
 
     static ThreadManagerThreadSnapshot _snapshot(const ThreadRecord& record) {
@@ -130,6 +140,31 @@ private:
             try { snapshot.StartOnInitialize = record.thread->GetStartOnInitialize(); } catch (...) {}
         }
         return snapshot;
+    }
+
+    std::shared_ptr<ManagerObservable> ObservableSnapshot() const {
+        std::lock_guard<std::mutex> lock(_observableMutex);
+        return _observable;
+    }
+
+    std::shared_ptr<ManagerObservable> EnsureObservable() noexcept {
+        std::lock_guard<std::mutex> lock(_observableMutex);
+        if (_observable) return _observable;
+        try {
+            _observable = System::Memory::MakeShared<
+                ManagerObservable,
+                ExternalPreferred
+            >();
+        } catch (...) {
+            return {};
+        }
+        return _observable;
+    }
+
+    template<typename TNotification>
+    void NotifyIfObserved(TNotification&& notification) {
+        auto observable = ObservableSnapshot();
+        if (observable) notification(*observable);
     }
 
     void _beginIteration() {
@@ -165,21 +200,16 @@ private:
     }
 
 protected:
-    /// <summary>Constructs the singleton manager and its externally preferred registry storage.</summary>
+    /// <summary>Constructs the singleton manager without allocating dynamic storage.</summary>
+    /// <remarks>The registry allocator binds lazily to the active ESPressio System memory provider on first growth; manager observer infrastructure is also deferred until first registration.</remarks>
     ThreadManager()
-        : _threads(ThreadRecordStorage{}),
-          _observable(System::Memory::MakeShared<
-              ManagerObservable,
-              System::Memory::MemoryPolicy::ExternalPreferred
-          >()) {}
+        : _threads(ThreadRecordStorage{}) {}
 
 public:
-    /// <summary>Returns the process-wide thread manager singleton.</summary>
+    /// <summary>Returns the process-wide thread manager singleton without heap-allocating the manager itself.</summary>
     static ThreadManager* GetInstance() {
-        // Manager/control state remains in normal/internal memory; only its
-        // variable-size registry and snapshots use ExternalPreferred storage.
-        static ThreadManager* instance = new ThreadManager();
-        return instance;
+        static ThreadManager instance;
+        return &instance;
     }
 
     /// <summary>Registers a thread and assigns it to a processor core.</summary>
@@ -259,10 +289,17 @@ public:
             });
 
             if (assignedThreadID != nullptr) *assignedThreadID = resolved.id;
-            if (inserted) _observable->ThreadRegistered(thread, _snapshot(resolved));
+            if (inserted) {
+                NotifyIfObserved([&](ManagerObservable& observable) {
+                    observable.ThreadRegistered(thread, _snapshot(resolved));
+                });
+            }
             return resolved.coreID;
         } catch (...) {
-            _observable->ThreadRegistrationFailed(thread, std::current_exception());
+            auto cause = std::current_exception();
+            NotifyIfObserved([&](ManagerObservable& observable) {
+                observable.ThreadRegistrationFailed(thread, cause);
+            });
             throw;
         }
     }
@@ -281,7 +318,11 @@ public:
             threads.erase(matching);
             removed = true;
         });
-        if (removed) _observable->ThreadRemoved(_snapshot(removedRecord));
+        if (removed) {
+            NotifyIfObserved([&](ManagerObservable& observable) {
+                observable.ThreadRemoved(_snapshot(removedRecord));
+            });
+        }
     }
 
     /// <summary>Removes the thread with the specified identifier from the registry without deleting it.</summary>
@@ -298,11 +339,18 @@ public:
             threads.erase(matching);
             removed = true;
         });
-        if (removed) _observable->ThreadRemoved(_snapshot(removedRecord));
+        if (removed) {
+            NotifyIfObserved([&](ManagerObservable& observable) {
+                observable.ThreadRemoved(_snapshot(removedRecord));
+            });
+        }
     }
 
-    /// <summary>Invokes a callback for a stable snapshot of all currently registered threads.</summary>
-    void ForEachThread(const std::function<void(IThread*)>& callback) {
+    /// <summary>Invokes a callback for a stable externally backed snapshot of all currently registered threads.</summary>
+    /// <typeparam name="TCallback">Concrete callable accepting an <c>IThread*</c>.</typeparam>
+    /// <remarks>The callable is invoked directly without <c>std::function</c> type erasure or associated callable allocation.</remarks>
+    template<typename TCallback>
+    void ForEachThread(TCallback&& callback) {
         IterationGuard iteration(*this);
         ThreadPointerSnapshot snapshot;
         _threads.WithSharedReadLock([&](const auto& threads) {
@@ -312,9 +360,12 @@ public:
         for (IThread* thread : snapshot) callback(thread);
     }
 
-    /// <summary>Invokes a callback for the thread with the requested identifier when present.</summary>
+    /// <summary>Invokes a concrete callback for the thread with the requested identifier when present.</summary>
+    /// <typeparam name="TCallback">Concrete callable accepting an <c>IThread*</c>.</typeparam>
     /// <returns><c>true</c> when a matching thread was found and the callback was invoked.</returns>
-    bool WithThread(uint8_t threadID, const std::function<void(IThread*)>& callback) {
+    /// <remarks>The callback is not type-erased through <c>std::function</c>.</remarks>
+    template<typename TCallback>
+    bool WithThread(uint8_t threadID, TCallback&& callback) {
         IterationGuard iteration(*this);
         IThread* result = nullptr;
         _threads.WithSharedReadLock([&](const auto& threads) {
@@ -354,7 +405,9 @@ public:
             result.ThreadCountBefore = GetThreadCount();
             result.ThreadCountAfter = result.ThreadCountBefore;
             iterationLock.unlock();
-            _observable->CleanupDeferred(result);
+            NotifyIfObserved([&](ManagerObservable& observable) {
+                observable.CleanupDeferred(result);
+            });
             return result;
         }
 
@@ -365,7 +418,9 @@ public:
             });
             result.ThreadsExamined = snapshot.size();
             result.ThreadCountBefore = snapshot.size();
-            _observable->CleanupStarted(result);
+            NotifyIfObserved([&](ManagerObservable& observable) {
+                observable.CleanupStarted(result);
+            });
 
             claimedRecords.reserve(snapshot.size());
             for (const ThreadRecord& record : snapshot) {
@@ -374,7 +429,9 @@ public:
                     record.thread->TryClaimAutomaticCleanup()) {
                     claimedRecords.push_back({record.id, record.thread, _snapshot(record), false});
                     ++result.ThreadsClaimed;
-                    _observable->CleanupClaimed(record.thread, claimedRecords.back().snapshot);
+                    NotifyIfObserved([&](ManagerObservable& observable) {
+                        observable.CleanupClaimed(record.thread, claimedRecords.back().snapshot);
+                    });
                 }
             }
 
@@ -399,17 +456,24 @@ public:
             iterationLock.unlock();
             for (ClaimedCleanupRecord& claimed : claimedRecords) {
                 if (!claimed.removed) continue;
-                _observable->ThreadRemoved(claimed.snapshot);
+                NotifyIfObserved([&](ManagerObservable& observable) {
+                    observable.ThreadRemoved(claimed.snapshot);
+                });
                 delete claimed.thread;
                 claimed.thread = nullptr;
                 ++result.ThreadsDeleted;
             }
 
-            _observable->CleanupCompleted(result);
+            NotifyIfObserved([&](ManagerObservable& observable) {
+                observable.CleanupCompleted(result);
+            });
             return result;
         } catch (...) {
             if (iterationLock.owns_lock()) iterationLock.unlock();
-            _observable->CleanupFailed(result, std::current_exception());
+            auto cause = std::current_exception();
+            NotifyIfObserved([&](ManagerObservable& observable) {
+                observable.CleanupFailed(result, cause);
+            });
             throw;
         }
     }
@@ -418,11 +482,11 @@ public:
     void CleanUp() { static_cast<void>(CleanUpWithResult()); }
 
     /// <summary>Initializes a snapshot of all registered threads.</summary>
-    /// <returns>One initialization result for each thread examined.</returns>
-    std::vector<ThreadInitializationResult> InitializeWithResults() {
+    /// <returns>One initialization result for each thread examined in externally preferred owning storage.</returns>
+    InitializationResultStorage InitializeWithResults() {
         IterationGuard iteration(*this);
         InitializationTargetStorage snapshot;
-        std::vector<ThreadInitializationResult> results;
+        InitializationResultStorage results;
 
         _threads.WithSharedReadLock([&](const auto& threads) {
             snapshot.reserve(threads.size());
@@ -445,21 +509,26 @@ public:
                 ++summary.ThreadsInitializationFailed;
             }
         }
-        _observable->InitializationCompleted(summary);
+        NotifyIfObserved([&](ManagerObservable& observable) {
+            observable.InitializationCompleted(summary);
+        });
         return results;
     }
 
     /// <summary>Initializes all registered threads and discards individual results.</summary>
     void Initialize() { static_cast<void>(InitializeWithResults()); }
 
-    /// <summary>Registers an observer for manager-level lifecycle notifications.</summary>
+    /// <summary>Registers an observer for manager-level lifecycle notifications, materializing external-preferred observer bookkeeping on first use.</summary>
     Observable::ObserverHandlePtr RegisterObserver(IThreadManagerObserver* observer) {
-        return _observable->RegisterObserver(observer);
+        if (observer == nullptr) return {};
+        auto observable = EnsureObservable();
+        return observable ? observable->RegisterObserver(observer) : Observable::ObserverHandlePtr{};
     }
 
-    /// <summary>Unregisters a manager observer.</summary>
+    /// <summary>Unregisters a manager observer without materializing observer infrastructure when none exists.</summary>
     void UnregisterObserver(IThreadManagerObserver* observer) {
-        _observable->UnregisterObserver(observer);
+        auto observable = ObservableSnapshot();
+        if (observable) observable->UnregisterObserver(observer);
     }
 
     /// <summary>Returns the number of currently registered threads.</summary>
