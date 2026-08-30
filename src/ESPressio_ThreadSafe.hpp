@@ -20,6 +20,8 @@
 #include <shared_mutex>
 #include <utility>
 
+#include <ESPressio_Memory.hpp>
+
 #if defined(ESPRESSIO_THREADS_RESTORE_MIN_MACRO)
     #pragma pop_macro("min")
     #undef ESPRESSIO_THREADS_RESTORE_MIN_MACRO
@@ -119,10 +121,12 @@ namespace ESPressio {
             private:
                 using MutableCallback = typename IThreadSafe<T>::MutableCallback;
                 using SharedReadCallback = typename IThreadSafe<T>::SharedReadCallback;
+                static constexpr auto ExternalPreferred = System::Memory::MemoryPolicy::ExternalPreferred;
+                using CallbackStorage = System::Memory::UniquePtr<ThreadSafeCallbacks<T>, ExternalPreferred>;
 
                 T _value;
                 std::mutex _mutex;
-                std::unique_ptr<ThreadSafeCallbacks<T>> _callbacks;
+                CallbackStorage _callbacks;
 
                 bool _equals(const T& a, const T& b) const {
                     return
@@ -137,13 +141,17 @@ namespace ESPressio {
 
             public:
                 /// <summary>Creates an exclusive synchronized value with optional change and comparison callbacks.</summary>
+                /// <remarks>Optional callback state is externally preferred because it is ordinary application metadata and does not require internal/DMA-capable memory.</remarks>
                 Mutex(
                     T value,
                     std::function<void(T,T)> onChange = nullptr,
                     std::function<bool(T,T)> onCompare = nullptr
                 ) : _value(std::move(value)) {
                     if (onChange != nullptr || onCompare != nullptr) {
-                        _callbacks = std::make_unique<ThreadSafeCallbacks<T>>(
+                        _callbacks = System::Memory::MakeUnique<
+                            ThreadSafeCallbacks<T>,
+                            ExternalPreferred
+                        >(
                             std::move(onChange),
                             std::move(onCompare)
                         );
@@ -274,10 +282,12 @@ namespace ESPressio {
             private:
                 using MutableCallback = typename IThreadSafe<T>::MutableCallback;
                 using SharedReadCallback = typename IThreadSafe<T>::SharedReadCallback;
+                static constexpr auto ExternalPreferred = System::Memory::MemoryPolicy::ExternalPreferred;
+                using CallbackStorage = System::Memory::UniquePtr<ThreadSafeCallbacks<T>, ExternalPreferred>;
 
                 T _value;
                 std::shared_mutex _mutex;
-                std::unique_ptr<ThreadSafeCallbacks<T>> _callbacks;
+                CallbackStorage _callbacks;
 
                 bool _equals(const T& a, const T& b) const {
                     return
@@ -292,13 +302,17 @@ namespace ESPressio {
 
             public:
                 /// <summary>Creates a read/write synchronized value with optional change and comparison callbacks.</summary>
+                /// <remarks>Optional callback state is externally preferred because it is ordinary application metadata and does not require internal/DMA-capable memory.</remarks>
                 ReadWriteMutex(
                     T value,
                     std::function<void(T,T)> onChange = nullptr,
                     std::function<bool(T,T)> onCompare = nullptr
                 ) : _value(std::move(value)) {
                     if (onChange != nullptr || onCompare != nullptr) {
-                        _callbacks = std::make_unique<ThreadSafeCallbacks<T>>(
+                        _callbacks = System::Memory::MakeUnique<
+                            ThreadSafeCallbacks<T>,
+                            ExternalPreferred
+                        >(
                             std::move(onChange),
                             std::move(onCompare)
                         );
