@@ -27,6 +27,12 @@ namespace Threads {
 
 class ThreadTerminationDispatcher;
 
+/// <summary>Controls when a Thread becomes visible to ThreadManager.</summary>
+enum class ThreadRegistrationPolicy : uint8_t {
+    Immediate,
+    DeferredUntilInitialize
+};
+
 /// <summary>Concrete managed task implementation providing the ESPressio IThread lifecycle and observer/callback surfaces.</summary>
 /// <remarks>Thread owns an underlying platform task while initialized, serializes lifecycle transitions through ESPressio System synchronization, and defers task-exit finalization through ThreadTerminationDispatcher.</remarks>
 class Thread : public IThread {
@@ -104,6 +110,8 @@ private:
     }
 
     uint8_t _threadID = 0;
+    ThreadRegistrationPolicy _registrationPolicy = ThreadRegistrationPolicy::Immediate;
+    std::atomic<bool> _registered{false};
 
     std::atomic<ThreadState> _threadState{ThreadState::Uninitialized};
     std::atomic<bool> _freeOnTerminate{false};
@@ -138,6 +146,9 @@ private:
     StableCallback<TOnThreadInitializationFailedEvent> _onInitializationFailed;
     StableCallback<TOnThreadExecutionFailedEvent> _onExecutionFailed;
     StableCallback<TOnThreadStateChangeEvent> _onStateChange;
+
+    bool _ensureRegistered();
+    void _removeRegistration() noexcept;
 
     bool _isValidThreadStateTransition(ThreadState oldState, ThreadState newState) const noexcept {
         if (oldState == newState) return false;
@@ -326,8 +337,16 @@ public:
     friend class ThreadTerminationDispatcher;
 
     Thread();
+    explicit Thread(ThreadRegistrationPolicy registrationPolicy);
 
     explicit Thread(ThreadReleasePolicy releasePolicy) : Thread() {
+        SetFreeOnTerminate(releasePolicy == ThreadReleasePolicy::ReleaseOnTerminate);
+    }
+
+    Thread(
+        ThreadReleasePolicy releasePolicy,
+        ThreadRegistrationPolicy registrationPolicy
+    ) : Thread(registrationPolicy) {
         SetFreeOnTerminate(releasePolicy == ThreadReleasePolicy::ReleaseOnTerminate);
     }
 
@@ -408,6 +427,9 @@ private:
     }
 
     ThreadInitializationStatus _initialize() {
+        if (!_ensureRegistered()) {
+            return ThreadInitializationStatus::InvalidState;
+        }
         if (_taskExited == nullptr || _taskStartGate == nullptr) {
             return ThreadInitializationStatus::ExitSignalUnavailable;
         }
