@@ -28,7 +28,7 @@ namespace Threads {
 class ThreadTerminationDispatcher;
 
 /// <summary>Concrete managed task implementation providing the ESPressio IThread lifecycle and observer/callback surfaces.</summary>
-/// <remarks>Thread owns an underlying platform task while initialized, serializes lifecycle transitions, and defers task-exit finalization through ThreadTerminationDispatcher.</remarks>
+/// <remarks>Thread owns an underlying platform task while initialized, serializes lifecycle transitions through ESPressio System synchronization, and defers task-exit finalization through ThreadTerminationDispatcher.</remarks>
 class Thread : public IThread {
 private:
     class LifecycleObservable final : public Observable::ThreadSafeObservable {
@@ -105,10 +105,6 @@ private:
 
     uint8_t _threadID = 0;
 
-    // Compound lifecycle transitions are serialized by _stateTransitionMutex.
-    // Reads therefore only need atomic visibility; keeping a separate
-    // ReadWriteMutex here previously added a pthread rwlock/FreeRTOS semaphore
-    // to every Thread and exposed the hot task loop to platform rwlock failure.
     std::atomic<ThreadState> _threadState{ThreadState::Uninitialized};
     std::atomic<bool> _freeOnTerminate{false};
     std::atomic<bool> _startOnInitialize{true};
@@ -123,8 +119,8 @@ private:
     std::unique_ptr<System::Synchronization::ISignal> _taskExited;
     std::unique_ptr<System::Synchronization::ISignal> _taskStartGate;
 
-    mutable std::mutex _taskConfigurationMutex;
-    mutable std::recursive_mutex _stateTransitionMutex;
+    mutable System::Synchronization::Mutex _taskConfigurationMutex;
+    mutable System::Synchronization::RecursiveMutex _stateTransitionMutex;
 
     std::atomic<uint32_t> _stackSize{ESPRESSIO_THREAD_DEFAULT_STACK_SIZE};
     std::atomic<unsigned int> _priority{2};
@@ -132,7 +128,7 @@ private:
 
     std::shared_ptr<LifecycleObservable> _lifecycleObservable;
 
-    mutable std::mutex _callbackMutex;
+    mutable System::Synchronization::Mutex _callbackMutex;
     StableCallback<TOnThreadEvent> _onDestroy;
     StableCallback<TOnThreadEvent> _onInitialize;
     StableCallback<TOnThreadEvent> _onStart;
@@ -222,7 +218,7 @@ private:
         try {
             StableCallback<TOnThreadExecutionFailedEvent> callback;
             {
-                std::lock_guard<std::mutex> lock(_callbackMutex);
+                std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex);
                 callback = _onExecutionFailed;
             }
             if (callback != nullptr) (*callback)(this, executionFailure);
@@ -264,7 +260,7 @@ private:
         StableCallback<TOnThreadEvent> onThreadEvent;
         bool callbackFailed = false;
         {
-            std::lock_guard<std::mutex> lock(_callbackMutex);
+            std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex);
             onStateChange = _onStateChange;
             switch (newState) {
                 case ThreadState::Terminated: onThreadEvent = _onTerminate; break;
@@ -297,7 +293,6 @@ private:
 
 protected:
     /// <summary>Performs one iteration of user thread work while the Thread is in the Running state.</summary>
-    /// <remarks>The default implementation sleeps for one millisecond. Derived classes normally override this method.</remarks>
     virtual void OnLoop() {
         Task::TaskRuntime::SleepMilliseconds(1);
     }
@@ -307,7 +302,7 @@ protected:
 
     /// <summary>Transitions the Thread to a valid new lifecycle state and dispatches associated callbacks/observer notifications.</summary>
     void SetThreadState(ThreadState state) {
-        std::lock_guard<std::recursive_mutex> transitionLock(_stateTransitionMutex);
+        std::lock_guard<System::Synchronization::RecursiveMutex> transitionLock(_stateTransitionMutex);
         const ThreadState oldState = _threadState.load(std::memory_order_acquire);
         if (!_isValidThreadStateTransition(oldState, state)) return;
         _threadState.store(state, std::memory_order_release);
@@ -315,9 +310,8 @@ protected:
     }
 
     /// <summary>Atomically performs a lifecycle transition only when the current state matches the expected state.</summary>
-    /// <returns>True when the transition was valid and applied.</returns>
     bool TrySetThreadState(ThreadState expectedState, ThreadState newState) {
-        std::lock_guard<std::recursive_mutex> transitionLock(_stateTransitionMutex);
+        std::lock_guard<System::Synchronization::RecursiveMutex> transitionLock(_stateTransitionMutex);
         const ThreadState currentState = _threadState.load(std::memory_order_acquire);
         if (
             currentState != expectedState ||
@@ -331,31 +325,24 @@ protected:
 public:
     friend class ThreadTerminationDispatcher;
 
-    /// <summary>Constructs a Thread with default explicit-release lifecycle policy and default task configuration.</summary>
     Thread();
 
-    /// <summary>Constructs a Thread with an explicit release policy.</summary>
     explicit Thread(ThreadReleasePolicy releasePolicy) : Thread() {
         SetFreeOnTerminate(releasePolicy == ThreadReleasePolicy::ReleaseOnTerminate);
     }
 
     virtual ~Thread();
 
-    /// <summary>Requests manager-driven cleanup of terminated threads that have opted into automatic release.</summary>
     void GarbageCollect();
 
-    /// <summary>Registers an observer for this Thread's lifecycle and execution notifications.</summary>
     Observable::ObserverHandlePtr RegisterThreadObserver(IThreadObserver* observer) {
         return _lifecycleObservable->RegisterObserverAs<IThreadObserver>(observer);
     }
 
-    /// <summary>Explicitly unregisters a lifecycle observer from this Thread.</summary>
     void UnregisterThreadObserver(IThreadObserver* observer) {
         _lifecycleObservable->UnregisterObserver(observer);
     }
 
-    /// <summary>Synchronously requests termination and waits for owned task-exit finalization when required.</summary>
-    /// <remarks>Shutdown also converts the instance to manual cleanup ownership so a caller-controlled object is not concurrently reclaimed by ThreadManager.</remarks>
     void Shutdown() {
         CleanupClaim expectedClaim = CleanupClaim::Available;
         _cleanupClaim.compare_exchange_strong(
@@ -446,7 +433,7 @@ private:
             return ThreadInitializationStatus::InvalidState;
         }
 
-        std::unique_lock<std::mutex> configurationLock(_taskConfigurationMutex);
+        std::unique_lock<System::Synchronization::Mutex> configurationLock(_taskConfigurationMutex);
         if (
             _taskHandle.load(std::memory_order_acquire) !=
             System::Execution::InvalidExecutionHandle
@@ -557,13 +544,12 @@ private:
     }
 
 public:
-    /// <inheritdoc/>
     ThreadInitializationStatus Initialize() override {
         const ThreadInitializationStatus status = _initialize();
         if (status != ThreadInitializationStatus::Success) {
             StableCallback<TOnThreadInitializationFailedEvent> callback;
             {
-                std::lock_guard<std::mutex> lock(_callbackMutex);
+                std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex);
                 callback = _onInitializationFailed;
             }
             if (callback != nullptr) {
@@ -574,7 +560,6 @@ public:
         return status;
     }
 
-    /// <inheritdoc/>
     void Terminate() override {
         switch (GetThreadState()) {
             case ThreadState::Uninitialized:
@@ -591,7 +576,6 @@ public:
         }
     }
 
-    /// <inheritdoc/>
     ThreadInitializationStatus Start() override {
         switch (GetThreadState()) {
             case ThreadState::Uninitialized:
@@ -616,12 +600,10 @@ public:
         return ThreadInitializationStatus::InvalidState;
     }
 
-    /// <inheritdoc/>
     void Pause() override {
         TrySetThreadState(ThreadState::Running, ThreadState::Paused);
     }
 
-    /// <inheritdoc/>
     bool TryClaimAutomaticCleanup() override {
         if (!GetFreeOnTerminate() || GetThreadState() != ThreadState::Terminated) return false;
         CleanupClaim expected = CleanupClaim::Available;
@@ -633,66 +615,46 @@ public:
         );
     }
 
-    /// <inheritdoc/>
     int GetCoreID() override { return _coreID.load(std::memory_order_acquire); }
-    /// <inheritdoc/>
     uint32_t GetStackSize() override { return _stackSize.load(std::memory_order_acquire); }
-    /// <inheritdoc/>
     unsigned int GetPriority() override { return _priority.load(std::memory_order_acquire); }
-    /// <inheritdoc/>
     uint8_t GetThreadID() override { return _threadID; }
-    /// <inheritdoc/>
     ThreadState GetThreadState() override { return _threadState.load(std::memory_order_acquire); }
-    /// <inheritdoc/>
     bool GetFreeOnTerminate() override { return _freeOnTerminate.load(std::memory_order_acquire); }
-    /// <inheritdoc/>
     bool GetStartOnInitialize() override { return _startOnInitialize.load(std::memory_order_acquire); }
 
-    /// <inheritdoc/>
-    TOnThreadEvent GetOnDestroy() override { std::lock_guard<std::mutex> lock(_callbackMutex); return _onDestroy ? *_onDestroy : TOnThreadEvent{}; }
-    /// <inheritdoc/>
-    TOnThreadEvent GetOnInitialize() override { std::lock_guard<std::mutex> lock(_callbackMutex); return _onInitialize ? *_onInitialize : TOnThreadEvent{}; }
-    /// <inheritdoc/>
-    TOnThreadEvent GetOnStart() override { std::lock_guard<std::mutex> lock(_callbackMutex); return _onStart ? *_onStart : TOnThreadEvent{}; }
-    /// <inheritdoc/>
-    TOnThreadEvent GetOnPause() override { std::lock_guard<std::mutex> lock(_callbackMutex); return _onPause ? *_onPause : TOnThreadEvent{}; }
-    /// <inheritdoc/>
-    TOnThreadEvent GetOnTerminate() override { std::lock_guard<std::mutex> lock(_callbackMutex); return _onTerminate ? *_onTerminate : TOnThreadEvent{}; }
-    /// <inheritdoc/>
-    TOnThreadEvent GetOnTerminated() override { std::lock_guard<std::mutex> lock(_callbackMutex); return _onTerminated ? *_onTerminated : TOnThreadEvent{}; }
-    /// <inheritdoc/>
-    TOnThreadInitializationFailedEvent GetOnInitializationFailed() override { std::lock_guard<std::mutex> lock(_callbackMutex); return _onInitializationFailed ? *_onInitializationFailed : TOnThreadInitializationFailedEvent{}; }
-    /// <inheritdoc/>
-    TOnThreadExecutionFailedEvent GetOnExecutionFailed() override { std::lock_guard<std::mutex> lock(_callbackMutex); return _onExecutionFailed ? *_onExecutionFailed : TOnThreadExecutionFailedEvent{}; }
-    /// <inheritdoc/>
-    TOnThreadStateChangeEvent GetOnStateChange() override { std::lock_guard<std::mutex> lock(_callbackMutex); return _onStateChange ? *_onStateChange : TOnThreadStateChangeEvent{}; }
+    TOnThreadEvent GetOnDestroy() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onDestroy ? *_onDestroy : TOnThreadEvent{}; }
+    TOnThreadEvent GetOnInitialize() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onInitialize ? *_onInitialize : TOnThreadEvent{}; }
+    TOnThreadEvent GetOnStart() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onStart ? *_onStart : TOnThreadEvent{}; }
+    TOnThreadEvent GetOnPause() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onPause ? *_onPause : TOnThreadEvent{}; }
+    TOnThreadEvent GetOnTerminate() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onTerminate ? *_onTerminate : TOnThreadEvent{}; }
+    TOnThreadEvent GetOnTerminated() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onTerminated ? *_onTerminated : TOnThreadEvent{}; }
+    TOnThreadInitializationFailedEvent GetOnInitializationFailed() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onInitializationFailed ? *_onInitializationFailed : TOnThreadInitializationFailedEvent{}; }
+    TOnThreadExecutionFailedEvent GetOnExecutionFailed() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onExecutionFailed ? *_onExecutionFailed : TOnThreadExecutionFailedEvent{}; }
+    TOnThreadStateChangeEvent GetOnStateChange() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onStateChange ? *_onStateChange : TOnThreadStateChangeEvent{}; }
 
-    /// <inheritdoc/>
     void SetCoreID(int value) override {
-        std::lock_guard<std::mutex> lock(_taskConfigurationMutex);
+        std::lock_guard<System::Synchronization::Mutex> lock(_taskConfigurationMutex);
         if (_taskHandle.load(std::memory_order_acquire) == System::Execution::InvalidExecutionHandle) {
             _coreID.store(value, std::memory_order_release);
         }
     }
 
-    /// <inheritdoc/>
     void SetStackSize(uint32_t value) override {
-        std::lock_guard<std::mutex> lock(_taskConfigurationMutex);
+        std::lock_guard<System::Synchronization::Mutex> lock(_taskConfigurationMutex);
         if (
             _taskHandle.load(std::memory_order_acquire) == System::Execution::InvalidExecutionHandle &&
             value > 0
         ) _stackSize.store(value, std::memory_order_release);
     }
 
-    /// <inheritdoc/>
     void SetPriority(unsigned int value) override {
-        std::lock_guard<std::mutex> lock(_taskConfigurationMutex);
+        std::lock_guard<System::Synchronization::Mutex> lock(_taskConfigurationMutex);
         if (_taskHandle.load(std::memory_order_acquire) == System::Execution::InvalidExecutionHandle) {
             _priority.store(value, std::memory_order_release);
         }
     }
 
-    /// <inheritdoc/>
     void SetFreeOnTerminate(bool value) override {
         _freeOnTerminate.store(value, std::memory_order_release);
         if (value) {
@@ -714,29 +676,19 @@ public:
         }
     }
 
-    /// <inheritdoc/>
     void SetStartOnInitialize(bool value) override {
         _startOnInitialize.store(value, std::memory_order_release);
     }
 
-    /// <inheritdoc/>
-    void SetOnDestroy(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<std::mutex> lock(_callbackMutex); _onDestroy=std::move(c); }
-    /// <inheritdoc/>
-    void SetOnInitialize(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<std::mutex> lock(_callbackMutex); _onInitialize=std::move(c); }
-    /// <inheritdoc/>
-    void SetOnStart(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<std::mutex> lock(_callbackMutex); _onStart=std::move(c); }
-    /// <inheritdoc/>
-    void SetOnPause(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<std::mutex> lock(_callbackMutex); _onPause=std::move(c); }
-    /// <inheritdoc/>
-    void SetOnTerminate(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<std::mutex> lock(_callbackMutex); _onTerminate=std::move(c); }
-    /// <inheritdoc/>
-    void SetOnTerminated(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<std::mutex> lock(_callbackMutex); _onTerminated=std::move(c); }
-    /// <inheritdoc/>
-    void SetOnInitializationFailed(TOnThreadInitializationFailedEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<std::mutex> lock(_callbackMutex); _onInitializationFailed=std::move(c); }
-    /// <inheritdoc/>
-    void SetOnExecutionFailed(TOnThreadExecutionFailedEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<std::mutex> lock(_callbackMutex); _onExecutionFailed=std::move(c); }
-    /// <inheritdoc/>
-    void SetOnStateChange(TOnThreadStateChangeEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<std::mutex> lock(_callbackMutex); _onStateChange=std::move(c); }
+    void SetOnDestroy(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onDestroy=std::move(c); }
+    void SetOnInitialize(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onInitialize=std::move(c); }
+    void SetOnStart(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onStart=std::move(c); }
+    void SetOnPause(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onPause=std::move(c); }
+    void SetOnTerminate(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onTerminate=std::move(c); }
+    void SetOnTerminated(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onTerminated=std::move(c); }
+    void SetOnInitializationFailed(TOnThreadInitializationFailedEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onInitializationFailed=std::move(c); }
+    void SetOnExecutionFailed(TOnThreadExecutionFailedEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onExecutionFailed=std::move(c); }
+    void SetOnStateChange(TOnThreadStateChangeEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onStateChange=std::move(c); }
 };
 
 }
