@@ -8,7 +8,11 @@
 namespace ESPressio {
 
     namespace Threads {
-        Thread::Thread() : _threadID(0) {
+        Thread::Thread() : Thread(ThreadRegistrationPolicy::Immediate) {}
+
+        Thread::Thread(ThreadRegistrationPolicy registrationPolicy)
+            : _threadID(0),
+              _registrationPolicy(registrationPolicy) {
             try {
                 _taskExited = System::Synchronization::CreateBinarySignal();
                 _taskStartGate = System::Synchronization::CreateBinarySignal();
@@ -17,21 +21,46 @@ namespace ESPressio {
                         LifecycleObservable,
                         System::Memory::MemoryPolicy::ExternalPreferred
                     >();
-                SetCoreID(
-                    ThreadManager::GetInstance()->AddThread(this, &_threadID)
-                );
+
+                if (_registrationPolicy == ThreadRegistrationPolicy::Immediate) {
+                    if (!_ensureRegistered()) {
+                        throw std::runtime_error("Thread registration failed");
+                    }
+                }
             } catch (...) {
                 const std::exception_ptr constructionFailure =
                     std::current_exception();
-                try {
-                    ThreadManager::GetInstance()->RemoveThread(this);
-                } catch (...) {
-                    // Preserve the original construction failure.
-                }
+                _removeRegistration();
                 _taskStartGate.reset();
                 _taskExited.reset();
                 std::rethrow_exception(constructionFailure);
             }
+        }
+
+        bool Thread::_ensureRegistered() {
+            if (_registered.load(std::memory_order_acquire)) return true;
+
+            uint8_t threadID = 0;
+            const int coreID = ThreadManager::GetInstance()->AddThread(this, &threadID);
+            _threadID = threadID;
+            SetCoreID(coreID);
+            _registered.store(true, std::memory_order_release);
+            return true;
+        }
+
+        void Thread::_removeRegistration() noexcept {
+            bool expected = true;
+            if (!_registered.compare_exchange_strong(
+                    expected,
+                    false,
+                    std::memory_order_acq_rel,
+                    std::memory_order_acquire
+                )) {
+                return;
+            }
+            try {
+                ThreadManager::GetInstance()->RemoveThread(this);
+            } catch (...) {}
         }
 
         Thread::~Thread() {
@@ -54,7 +83,7 @@ namespace ESPressio {
             _deleteTask();
             _taskStartGate.reset();
             _taskExited.reset();
-            ThreadManager::GetInstance()->RemoveThread(this);
+            _removeRegistration();
         }
 
         void Thread::_requestGarbageCollection() {
