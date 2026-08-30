@@ -105,9 +105,14 @@ private:
 
     uint8_t _threadID = 0;
 
+    // Lifecycle state needs compound transitions and therefore keeps the
+    // synchronized wrapper. Independent scalar configuration and ownership
+    // flags require only atomic get/set semantics; using ReadWriteMutex for
+    // each of them previously embedded five unnecessary shared mutexes in
+    // every Thread instance.
     ReadWriteMutex<ThreadState> _threadState{ThreadState::Uninitialized};
-    ReadWriteMutex<bool> _freeOnTerminate{false};
-    ReadWriteMutex<bool> _startOnInitialize{true};
+    std::atomic<bool> _freeOnTerminate{false};
+    std::atomic<bool> _startOnInitialize{true};
 
     std::atomic<Task::TaskHandle> _taskHandle{System::Execution::InvalidExecutionHandle};
     std::atomic<Task::TaskHandle> _initializingTaskHandle{System::Execution::InvalidExecutionHandle};
@@ -122,9 +127,9 @@ private:
     mutable std::mutex _taskConfigurationMutex;
     mutable std::recursive_mutex _stateTransitionMutex;
 
-    ReadWriteMutex<uint32_t> _stackSize{ESPRESSIO_THREAD_DEFAULT_STACK_SIZE};
-    ReadWriteMutex<unsigned int> _priority{2};
-    ReadWriteMutex<int> _coreID{0};
+    std::atomic<uint32_t> _stackSize{ESPRESSIO_THREAD_DEFAULT_STACK_SIZE};
+    std::atomic<unsigned int> _priority{2};
+    std::atomic<int> _coreID{0};
 
     std::shared_ptr<LifecycleObservable> _lifecycleObservable;
 
@@ -642,19 +647,19 @@ public:
     }
 
     /// <inheritdoc/>
-    int GetCoreID() override { return _coreID.Get(); }
+    int GetCoreID() override { return _coreID.load(std::memory_order_acquire); }
     /// <inheritdoc/>
-    uint32_t GetStackSize() override { return _stackSize.Get(); }
+    uint32_t GetStackSize() override { return _stackSize.load(std::memory_order_acquire); }
     /// <inheritdoc/>
-    unsigned int GetPriority() override { return _priority.Get(); }
+    unsigned int GetPriority() override { return _priority.load(std::memory_order_acquire); }
     /// <inheritdoc/>
     uint8_t GetThreadID() override { return _threadID; }
     /// <inheritdoc/>
     ThreadState GetThreadState() override { return _threadState.Get(); }
     /// <inheritdoc/>
-    bool GetFreeOnTerminate() override { return _freeOnTerminate.Get(); }
+    bool GetFreeOnTerminate() override { return _freeOnTerminate.load(std::memory_order_acquire); }
     /// <inheritdoc/>
-    bool GetStartOnInitialize() override { return _startOnInitialize.Get(); }
+    bool GetStartOnInitialize() override { return _startOnInitialize.load(std::memory_order_acquire); }
 
     /// <inheritdoc/>
     TOnThreadEvent GetOnDestroy() override { std::lock_guard<std::mutex> lock(_callbackMutex); return _onDestroy ? *_onDestroy : TOnThreadEvent{}; }
@@ -679,7 +684,7 @@ public:
     void SetCoreID(int value) override {
         std::lock_guard<std::mutex> lock(_taskConfigurationMutex);
         if (_taskHandle.load(std::memory_order_acquire) == System::Execution::InvalidExecutionHandle) {
-            _coreID.Set(value);
+            _coreID.store(value, std::memory_order_release);
         }
     }
 
@@ -689,20 +694,20 @@ public:
         if (
             _taskHandle.load(std::memory_order_acquire) == System::Execution::InvalidExecutionHandle &&
             value > 0
-        ) _stackSize.Set(value);
+        ) _stackSize.store(value, std::memory_order_release);
     }
 
     /// <inheritdoc/>
     void SetPriority(unsigned int value) override {
         std::lock_guard<std::mutex> lock(_taskConfigurationMutex);
         if (_taskHandle.load(std::memory_order_acquire) == System::Execution::InvalidExecutionHandle) {
-            _priority.Set(value);
+            _priority.store(value, std::memory_order_release);
         }
     }
 
     /// <inheritdoc/>
     void SetFreeOnTerminate(bool value) override {
-        _freeOnTerminate.Set(value);
+        _freeOnTerminate.store(value, std::memory_order_release);
         if (value) {
             CleanupClaim expected = CleanupClaim::Manual;
             _cleanupClaim.compare_exchange_strong(
@@ -723,7 +728,9 @@ public:
     }
 
     /// <inheritdoc/>
-    void SetStartOnInitialize(bool value) override { _startOnInitialize.Set(value); }
+    void SetStartOnInitialize(bool value) override {
+        _startOnInitialize.store(value, std::memory_order_release);
+    }
 
     /// <inheritdoc/>
     void SetOnDestroy(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<std::mutex> lock(_callbackMutex); _onDestroy=std::move(c); }
