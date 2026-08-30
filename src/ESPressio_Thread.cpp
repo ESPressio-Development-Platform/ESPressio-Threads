@@ -40,7 +40,7 @@ namespace ESPressio {
             SetThreadState(ThreadState::Destroyed);
             StableCallback<TOnThreadEvent> onDestroy;
             {
-                std::lock_guard<std::mutex> lock(_callbackMutex);
+                std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex);
                 onDestroy = _onDestroy;
             }
             if (onDestroy != nullptr) {
@@ -80,7 +80,7 @@ namespace ESPressio {
                 GetThreadState() == ThreadState::Terminated;
             StableCallback<TOnThreadEvent> onTerminated;
             {
-                std::lock_guard<std::mutex> lock(_callbackMutex);
+                std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex);
                 onTerminated = _onTerminated;
             }
             if (terminated && onTerminated != nullptr) {
