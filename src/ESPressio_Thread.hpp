@@ -105,12 +105,11 @@ private:
 
     uint8_t _threadID = 0;
 
-    // Lifecycle state needs compound transitions and therefore keeps the
-    // synchronized wrapper. Independent scalar configuration and ownership
-    // flags require only atomic get/set semantics; using ReadWriteMutex for
-    // each of them previously embedded five unnecessary shared mutexes in
-    // every Thread instance.
-    ReadWriteMutex<ThreadState> _threadState{ThreadState::Uninitialized};
+    // Compound lifecycle transitions are serialized by _stateTransitionMutex.
+    // Reads therefore only need atomic visibility; keeping a separate
+    // ReadWriteMutex here previously added a pthread rwlock/FreeRTOS semaphore
+    // to every Thread and exposed the hot task loop to platform rwlock failure.
+    std::atomic<ThreadState> _threadState{ThreadState::Uninitialized};
     std::atomic<bool> _freeOnTerminate{false};
     std::atomic<bool> _startOnInitialize{true};
 
@@ -243,7 +242,7 @@ private:
 
     void _loop() {
         for (;;) {
-            switch (_threadState.Get()) {
+            switch (_threadState.load(std::memory_order_acquire)) {
                 case ThreadState::Paused:
                 case ThreadState::Initialized:
                 case ThreadState::Uninitialized:
@@ -309,36 +308,24 @@ protected:
     /// <summary>Transitions the Thread to a valid new lifecycle state and dispatches associated callbacks/observer notifications.</summary>
     void SetThreadState(ThreadState state) {
         std::lock_guard<std::recursive_mutex> transitionLock(_stateTransitionMutex);
-        ThreadState oldState = state;
-        bool changed = false;
-
-        _threadState.WithWriteLock([&](ThreadState& currentState) {
-            if (!_isValidThreadStateTransition(currentState, state)) return;
-            oldState = currentState;
-            currentState = state;
-            changed = true;
-        });
-
-        if (changed) _dispatchThreadStateChange(oldState, state);
+        const ThreadState oldState = _threadState.load(std::memory_order_acquire);
+        if (!_isValidThreadStateTransition(oldState, state)) return;
+        _threadState.store(state, std::memory_order_release);
+        _dispatchThreadStateChange(oldState, state);
     }
 
     /// <summary>Atomically performs a lifecycle transition only when the current state matches the expected state.</summary>
     /// <returns>True when the transition was valid and applied.</returns>
     bool TrySetThreadState(ThreadState expectedState, ThreadState newState) {
         std::lock_guard<std::recursive_mutex> transitionLock(_stateTransitionMutex);
-        bool changed = false;
-
-        _threadState.WithWriteLock([&](ThreadState& currentState) {
-            if (
-                currentState != expectedState ||
-                !_isValidThreadStateTransition(currentState, newState)
-            ) return;
-            currentState = newState;
-            changed = true;
-        });
-
-        if (changed) _dispatchThreadStateChange(expectedState, newState);
-        return changed;
+        const ThreadState currentState = _threadState.load(std::memory_order_acquire);
+        if (
+            currentState != expectedState ||
+            !_isValidThreadStateTransition(currentState, newState)
+        ) return false;
+        _threadState.store(newState, std::memory_order_release);
+        _dispatchThreadStateChange(expectedState, newState);
+        return true;
     }
 
 public:
@@ -655,7 +642,7 @@ public:
     /// <inheritdoc/>
     uint8_t GetThreadID() override { return _threadID; }
     /// <inheritdoc/>
-    ThreadState GetThreadState() override { return _threadState.Get(); }
+    ThreadState GetThreadState() override { return _threadState.load(std::memory_order_acquire); }
     /// <inheritdoc/>
     bool GetFreeOnTerminate() override { return _freeOnTerminate.load(std::memory_order_acquire); }
     /// <inheritdoc/>
