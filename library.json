@@ -31,11 +31,11 @@
         },
         {
             "name": "ESPressio-Units",
-            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Units.git#main"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Units.git#item_4_saturation_testing"
         },
         {
             "name": "ESPressio-Timing",
-            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git#feature/29-platform-clock-abstractions"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git#item_4_saturation_testing"
         },
         {
             "name": "ESPressio-Observable",
