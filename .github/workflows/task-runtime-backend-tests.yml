@@ -43,7 +43,7 @@ jobs:
           fi
 
           grep -q 'ESPressio-Task' library.json
-          grep -q '#main' library.json
+          grep -q '#structural_realignment' library.json
 
   esp32-task-runtime-compile:
     runs-on: ubuntu-latest
@@ -54,27 +54,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-System
-          ref: main
+          ref: structural_realignment
           path: project/dependencies/ESPressio-System
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Task
-          ref: main
+          ref: structural_realignment
           path: project/dependencies/ESPressio-Task
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Observable
-          ref: main
+          ref: structural_realignment
           path: project/dependencies/ESPressio-Observable
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Timing
-          ref: main
+          ref: structural_realignment
           path: project/dependencies/ESPressio-Timing
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Units
-          ref: main
+          ref: structural_realignment
           path: project/dependencies/ESPressio-Units
       - uses: actions/setup-python@v5
         with:
