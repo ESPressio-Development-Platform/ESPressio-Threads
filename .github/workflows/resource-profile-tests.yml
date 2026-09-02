@@ -1,0 +1,71 @@
+name: Resource Profile Regression
+on: [push, pull_request]
+jobs:
+  termination-queue-profile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: project/ESPressio-Threads}
+      - uses: actions/checkout@v4
+        with: {repository: ESPressio-Development-Platform/ESPressio-System, ref: feature/1-system-memory-policy, path: project/dependencies/ESPressio-System}
+      - uses: actions/checkout@v4
+        with: {repository: ESPressio-Development-Platform/ESPressio-Task, ref: feature/1-task-execution, path: project/dependencies/ESPressio-Task}
+      - uses: actions/checkout@v4
+        with: {repository: ESPressio-Development-Platform/ESPressio-Timing, ref: item_4_saturation_testing, path: project/dependencies/ESPressio-Timing}
+      - uses: actions/checkout@v4
+        with: {repository: ESPressio-Development-Platform/ESPressio-Units, ref: item_4_saturation_testing, path: project/dependencies/ESPressio-Units}
+      - uses: actions/checkout@v4
+        with: {repository: ESPressio-Development-Platform/ESPressio-Observable, ref: feature/16-rtti-free-observer-registry, path: project/dependencies/ESPressio-Observable}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.x'}
+      - run: pip install platformio
+      - name: Create resource-profile consumers
+        shell: bash
+        run: |
+          mkdir -p project/compile/src
+          cat > project/compile/platformio.ini <<'EOF'
+          [platformio]
+          default_envs = default_profile, overridden_profile
+          [base]
+          platform = espressif32
+          board = esp32dev
+          framework = arduino
+          build_flags = -std=gnu++17 -fno-rtti
+          build_unflags = -std=gnu++11 -frtti
+          lib_ldf_mode = deep+
+          lib_deps =
+              ../dependencies/ESPressio-System
+              ../dependencies/ESPressio-Task
+              ../dependencies/ESPressio-Observable
+              ../dependencies/ESPressio-Units
+              ../dependencies/ESPressio-Timing
+              ../ESPressio-Threads
+          [env:default_profile]
+          extends = base
+          [env:overridden_profile]
+          extends = base
+          build_flags =
+              ${base.build_flags}
+              -DESPRESSIO_THREAD_TERMINATION_QUEUE_LENGTH=64
+              -DEXPECTED_TERMINATION_QUEUE_LENGTH=64
+          EOF
+          cat > project/compile/src/main.cpp <<'EOF'
+          #include <Arduino.h>
+          #include <ESPressio_Thread.hpp>
+          #include <ESPressio_ThreadStackTelemetry.hpp>
+          #include <ESPressio_ThreadTerminationDispatcher.hpp>
+          #ifndef EXPECTED_TERMINATION_QUEUE_LENGTH
+          #define EXPECTED_TERMINATION_QUEUE_LENGTH 32
+          #endif
+          static_assert(ESPRESSIO_THREAD_TERMINATION_QUEUE_LENGTH == EXPECTED_TERMINATION_QUEUE_LENGTH, "termination queue profile must remain configurable");
+          class ProfileThread final : public ESPressio::Threads::Thread {};
+          void setup(){
+              ProfileThread thread;
+              const auto telemetry = ESPressio::Threads::GetThreadStackTelemetry(thread);
+              (void)telemetry;
+              (void)ESPressio::Threads::ThreadTerminationDispatcher::GetInstance();
+          }
+          void loop(){delay(1000);}
+          EOF
+      - name: Compile default and overridden resource profiles
+        run: pio run -d project/compile

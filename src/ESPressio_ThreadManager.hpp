@@ -1,1032 +1,511 @@
 #pragma once
 
-// define CORE_THREADING_DEBUG in your project to enable debugging!
-
 #include <algorithm>
 #include <cstddef>
 #include <exception>
-#include <functional>
 #include <limits>
-#include <mutex>
-#include <vector>
 #include <memory>
+#include <mutex>
+#include <utility>
 
+#include <ESPressio_Execution.hpp>
+#include <ESPressio_Memory.hpp>
+#include <ESPressio_Synchronization.hpp>
 #include "ESPressio_ThreadSafe.hpp"
 #include "ESPressio_ThreadSafeObservable.hpp"
 #include "ESPressio_IThreadManagerObserver.hpp"
 #include "ESPressio_IThread.hpp"
 
 namespace ESPressio {
+namespace Threads {
 
-    namespace Threads {
+/// <summary>Captures the initialization outcome for one registered thread.</summary>
+struct ThreadInitializationResult {
+    uint8_t threadID;
+    ThreadInitializationStatus status;
+};
 
-        struct ThreadInitializationResult {
-            uint8_t threadID;
-            ThreadInitializationStatus status;
-        };
+/// <summary>Owns the registry and lifecycle coordination for ESPressio threads.</summary>
+/// <remarks>The manager assigns cores, initializes registered threads, coordinates automatic cleanup, and publishes manager-level lifecycle observations. Runtime synchronization is routed through ESPressio System and variable-size storage prefers external memory.</remarks>
+class ThreadManager {
+private:
+    static constexpr auto ExternalPreferred =
+        System::Memory::MemoryPolicy::ExternalPreferred;
 
-
-        class ThreadManager {
-            private:
-                class ManagerObservable final :
-                    public Observable::ThreadSafeObservable {
-                private:
-                    template <typename TCallback>
-                    void NotifyObservers(
-                        TCallback callback
-                    ) {
-                        ExecuteNotification(
-                            [&](NotificationContext& notification) {
-                                notification.WithObservers<
-                                    IThreadManagerObserver
-                                >(
-                                    [&](IThreadManagerObserver* observer) {
-                                        try {
-                                            callback(observer);
-                                        } catch (...) {
-                                            // Observer failures must never
-                                            // interfere with ThreadManager.
-                                        }
-                                    }
-                                );
-                            }
-                        );
+    class ManagerObservable final : public Observable::ThreadSafeObservable {
+        template<typename TCallback>
+        void NotifyObservers(TCallback&& callback) {
+            ExecuteNotification([&](NotificationContext& notification) {
+                notification.WithObservers<IThreadManagerObserver>(
+                    [&](IThreadManagerObserver* observer) {
+                        try { callback(observer); } catch (...) {}
                     }
-
-                public:
-                    void ThreadRegistered(
-                        IThread* thread,
-                        const ThreadManagerThreadSnapshot& snapshot
-                    ) {
-                        NotifyObservers(
-                            [&](IThreadManagerObserver* observer) {
-                                observer->OnThreadRegistered(
-                                    thread,
-                                    snapshot
-                                );
-                            }
-                        );
-                    }
-
-                    void ThreadRegistrationFailed(
-                        IThread* thread,
-                        std::exception_ptr cause
-                    ) {
-                        NotifyObservers(
-                            [&](IThreadManagerObserver* observer) {
-                                observer->OnThreadRegistrationFailed(
-                                    thread,
-                                    cause
-                                );
-                            }
-                        );
-                    }
-
-                    void ThreadRemoved(
-                        const ThreadManagerThreadSnapshot& snapshot
-                    ) {
-                        NotifyObservers(
-                            [&](IThreadManagerObserver* observer) {
-                                observer->OnThreadRemoved(snapshot);
-                            }
-                        );
-                    }
-
-                    void CleanupClaimed(
-                        IThread* thread,
-                        const ThreadManagerThreadSnapshot& snapshot
-                    ) {
-                        NotifyObservers(
-                            [&](IThreadManagerObserver* observer) {
-                                observer->OnThreadCleanupClaimed(
-                                    thread,
-                                    snapshot
-                                );
-                            }
-                        );
-                    }
-
-                    void CleanupDeferred(
-                        const ThreadManagerCleanupResult& result
-                    ) {
-                        NotifyObservers(
-                            [&](IThreadManagerObserver* observer) {
-                                observer->OnThreadCleanupDeferred(result);
-                            }
-                        );
-                    }
-
-                    void CleanupStarted(
-                        const ThreadManagerCleanupResult& result
-                    ) {
-                        NotifyObservers(
-                            [&](IThreadManagerObserver* observer) {
-                                observer->OnThreadCleanupStarted(result);
-                            }
-                        );
-                    }
-
-                    void CleanupCompleted(
-                        const ThreadManagerCleanupResult& result
-                    ) {
-                        NotifyObservers(
-                            [&](IThreadManagerObserver* observer) {
-                                observer->OnThreadCleanupCompleted(result);
-                            }
-                        );
-                    }
-
-                    void CleanupFailed(
-                        const ThreadManagerCleanupResult& result,
-                        std::exception_ptr cause
-                    ) {
-                        NotifyObservers(
-                            [&](IThreadManagerObserver* observer) {
-                                observer->OnThreadCleanupFailed(
-                                    result,
-                                    cause
-                                );
-                            }
-                        );
-                    }
-
-                    void InitializationCompleted(
-                        const ThreadManagerInitializationResult& result
-                    ) {
-                        NotifyObservers(
-                            [&](IThreadManagerObserver* observer) {
-                                observer->OnThreadManagerInitializationCompleted(
-                                    result
-                                );
-                            }
-                        );
-                    }
-                };
-
-
-                struct ThreadRecord {
-                    uint8_t id;
-                    IThread* thread;
-                    int coreID;
-
-                    bool operator==(
-                        const ThreadRecord& other
-                    ) const {
-                        return
-                            id == other.id &&
-                            thread == other.thread &&
-                            coreID == other.coreID;
-                    }
-                };
-
-                ReadWriteMutex<
-                    std::vector<ThreadRecord>
-                > _threads;
-
-                ReadWriteMutex<int>
-                    _nextCoreID =
-                        ReadWriteMutex<int>(0);
-
-                std::recursive_mutex _iterationMutex;
-                std::size_t _activeIterations = 0;
-                bool _cleanupPending = false;
-
-                std::shared_ptr<ManagerObservable>
-                    _observable =
-                        std::make_shared<ManagerObservable>();
-
-
-                static ThreadManagerThreadSnapshot
-                _snapshot(
-                    const ThreadRecord& record
-                ) {
-                    ThreadManagerThreadSnapshot snapshot;
-
-                    snapshot.ThreadID = record.id;
-                    snapshot.CoreID = record.coreID;
-
-                    if (record.thread != nullptr) {
-                        try {
-                            snapshot.State =
-                                record.thread->GetThreadState();
-                        } catch (...) {
-                        }
-
-                        try {
-                            snapshot.FreeOnTerminate =
-                                record.thread->GetFreeOnTerminate();
-                        } catch (...) {
-                        }
-
-                        try {
-                            snapshot.StartOnInitialize =
-                                record.thread->GetStartOnInitialize();
-                        } catch (...) {
-                        }
-                    }
-
-                    return snapshot;
-                }
-
-
-                void _beginIteration() {
-                    std::lock_guard<
-                        std::recursive_mutex
-                    > lock(_iterationMutex);
-
-                    ++_activeIterations;
-                }
-
-
-                void _endIteration() {
-                    bool runDeferredCleanup = false;
-
-                    {
-                        std::lock_guard<
-                            std::recursive_mutex
-                        > lock(_iterationMutex);
-
-                        if (_activeIterations > 0) {
-                            --_activeIterations;
-                        }
-
-                        if (
-                            _activeIterations == 0 &&
-                            _cleanupPending
-                        ) {
-                            _cleanupPending = false;
-                            runDeferredCleanup = true;
-                        }
-                    }
-
-                    if (runDeferredCleanup) {
-                        CleanUp();
-                    }
-                }
-
-
-                class IterationGuard {
-                    private:
-                        ThreadManager& _manager;
-
-                    public:
-                        explicit IterationGuard(
-                            ThreadManager& manager
-                        ) :
-                            _manager(manager) {
-
-                            _manager._beginIteration();
-                        }
-
-                        ~IterationGuard() {
-                            _manager._endIteration();
-                        }
-
-                        IterationGuard(
-                            const IterationGuard&
-                        ) = delete;
-
-                        IterationGuard& operator=(
-                            const IterationGuard&
-                        ) = delete;
-                };
-
-
-                static int _getCoreCount() {
-                    #if defined(portNUM_PROCESSORS)
-                        return
-                            portNUM_PROCESSORS > 0
-                                ? portNUM_PROCESSORS
-                                : 1;
-                    #elif defined(configNUMBER_OF_CORES)
-                        return
-                            configNUMBER_OF_CORES > 0
-                                ? configNUMBER_OF_CORES
-                                : 1;
-                    #else
-                        return 1;
-                    #endif
-                }
-
-
-            protected:
-                ThreadManager() :
-                    _threads(
-                        std::vector<
-                            ThreadRecord
-                        >()
-                    ) {
-                }
-
-
-            public:
-                static ThreadManager*
-                GetInstance() {
-                    // Process-lifetime by design: destroying the manager
-                    // during static teardown could race static Thread objects
-                    // and already-stopped FreeRTOS infrastructure.
-                    static ThreadManager* instance =
-                        new ThreadManager();
-
-                    return instance;
-                }
-
-
-                int AddThread(
-                    IThread* thread,
-                    uint8_t* assignedThreadID = nullptr
-                ) {
-                    try {
-                        if (thread == nullptr) {
-                            throw ThreadInvalidRegistrationException();
-                        }
-
-                        ThreadRecord resolved{
-                            0,
-                            nullptr,
-                            0
-                        };
-
-                        /*
-                         * Preserve idempotent AddThread() behaviour without
-                         * invoking custom virtual ID logic again.
-                         */
-                        _threads.WithSharedReadLock(
-                            [&](const std::vector<ThreadRecord>& threads) {
-                                const auto existing =
-                                    std::find_if(
-                                        threads.begin(),
-                                        threads.end(),
-                                        [thread](const ThreadRecord& record) {
-                                            return record.thread == thread;
-                                        }
-                                    );
-
-                                if (existing != threads.end()) {
-                                    resolved = *existing;
-                                }
-                            }
-                        );
-
-                        if (resolved.thread != nullptr) {
-                            if (assignedThreadID != nullptr) {
-                                *assignedThreadID =
-                                    resolved.id;
-                            }
-
-                            return resolved.coreID;
-                        }
-
-                        bool inserted = false;
-
-                        /*
-                         * Evaluate a custom ID before taking the registry lock:
-                         * custom IThread implementations may re-enter the
-                         * manager from GetThreadID().
-                         */
-                        const uint8_t requestedThreadID =
-                            assignedThreadID == nullptr
-                                ? thread->GetThreadID()
-                                : 0;
-
-                        _threads.WithWriteLock(
-                            [&](std::vector<ThreadRecord>& threads) {
-                                const auto existing =
-                                    std::find_if(
-                                        threads.begin(),
-                                        threads.end(),
-                                        [thread](const ThreadRecord& record) {
-                                            return record.thread == thread;
-                                        }
-                                    );
-
-                                if (existing != threads.end()) {
-                                    resolved = *existing;
-                                    return;
-                                }
-
-                                uint8_t recordID =
-                                    requestedThreadID;
-
-                                if (assignedThreadID != nullptr) {
-                                    bool assigned = false;
-
-                                    for (
-                                        unsigned int candidate = 1;
-                                        candidate <=
-                                            std::numeric_limits<uint8_t>::max();
-                                        ++candidate
-                                    ) {
-                                        const uint8_t candidateID =
-                                            static_cast<uint8_t>(candidate);
-
-                                        const bool inUse =
-                                            std::any_of(
-                                                threads.begin(),
-                                                threads.end(),
-                                                [candidateID](
-                                                    const ThreadRecord& record
-                                                ) {
-                                                    return
-                                                        record.id ==
-                                                        candidateID;
-                                                }
-                                            );
-
-                                        if (!inUse) {
-                                            recordID = candidateID;
-                                            assigned = true;
-                                            break;
-                                        }
-                                    }
-
-                                    if (!assigned) {
-                                        const bool zeroInUse =
-                                            std::any_of(
-                                                threads.begin(),
-                                                threads.end(),
-                                                [](const ThreadRecord& record) {
-                                                    return record.id == 0;
-                                                }
-                                            );
-
-                                        if (!zeroInUse) {
-                                            recordID = 0;
-                                            assigned = true;
-                                        }
-                                    }
-
-                                    if (!assigned) {
-                                        throw ThreadLimitExceededException();
-                                    }
-                                } else {
-                                    const bool idInUse =
-                                        std::any_of(
-                                            threads.begin(),
-                                            threads.end(),
-                                            [recordID](
-                                                const ThreadRecord& record
-                                            ) {
-                                                return
-                                                    record.id ==
-                                                    recordID;
-                                            }
-                                        );
-
-                                    if (idInUse) {
-                                        throw ThreadDuplicateIDException(
-                                            recordID
-                                        );
-                                    }
-                                }
-
-                                int useCore = 0;
-
-                                _nextCoreID.WithWriteLock(
-                                    [&](int& nextCoreID) {
-                                        const int coreCount =
-                                            _getCoreCount();
-
-                                        useCore =
-                                            nextCoreID %
-                                            coreCount;
-
-                                        threads.push_back({
-                                            recordID,
-                                            thread,
-                                            useCore
-                                        });
-
-                                        nextCoreID =
-                                            (useCore + 1) %
-                                            coreCount;
-                                    }
-                                );
-
-                                resolved = {
-                                    recordID,
-                                    thread,
-                                    useCore
-                                };
-
-                                inserted = true;
-                            }
-                        );
-
-                        if (assignedThreadID != nullptr) {
-                            *assignedThreadID =
-                                resolved.id;
-                        }
-
-                        /*
-                         * Only notify for a newly-owned registration.
-                         * An idempotent repeat AddThread() does not represent
-                         * a new logical operation.
-                         */
-                        if (inserted) {
-                            _observable->ThreadRegistered(
-                                thread,
-                                _snapshot(resolved)
-                            );
-                        }
-
-                        return resolved.coreID;
-                    } catch (...) {
-                        _observable->ThreadRegistrationFailed(
-                            thread,
-                            std::current_exception()
-                        );
-
-                        throw;
-                    }
-                }
-
-
-                void RemoveThread(
-                    IThread* thread
-                ) {
-                    bool removed = false;
-                    ThreadManagerThreadSnapshot snapshot;
-
-                    _threads.WithWriteLock(
-                        [&](std::vector<ThreadRecord>& threads) {
-                            const auto matching =
-                                std::find_if(
-                                    threads.begin(),
-                                    threads.end(),
-                                    [thread](const ThreadRecord& record) {
-                                        return
-                                            record.thread ==
-                                            thread;
-                                    }
-                                );
-
-                            if (matching == threads.end()) {
-                                return;
-                            }
-
-                            snapshot =
-                                _snapshot(*matching);
-
-                            threads.erase(matching);
-                            removed = true;
-                        }
-                    );
-
-                    if (removed) {
-                        _observable->ThreadRemoved(snapshot);
-                    }
-                }
-
-
-                void RemoveThread(
-                    uint8_t threadID
-                ) {
-                    bool removed = false;
-                    ThreadManagerThreadSnapshot snapshot;
-
-                    _threads.WithWriteLock(
-                        [&](std::vector<ThreadRecord>& threads) {
-                            const auto matching =
-                                std::find_if(
-                                    threads.begin(),
-                                    threads.end(),
-                                    [threadID](const ThreadRecord& record) {
-                                        return
-                                            record.id ==
-                                            threadID;
-                                    }
-                                );
-
-                            if (matching == threads.end()) {
-                                return;
-                            }
-
-                            snapshot =
-                                _snapshot(*matching);
-
-                            threads.erase(matching);
-                            removed = true;
-                        }
-                    );
-
-                    if (removed) {
-                        _observable->ThreadRemoved(snapshot);
-                    }
-                }
-
-
-                void ForEachThread(
-                    std::function<
-                        void(IThread*)
-                    > callback
-                ) {
-                    IterationGuard iteration(
-                        *this
-                    );
-
-                    std::vector<
-                        ThreadRecord
-                    > snapshot;
-
-                    _threads.WithSharedReadLock(
-                        [&snapshot](
-                            const std::vector<
-                                ThreadRecord
-                            >& threads
-                        ) {
-                            snapshot = threads;
-                        }
-                    );
-
-                    for (
-                        const ThreadRecord&
-                            record :
-                        snapshot
-                    ) {
-                        callback(
-                            record.thread
-                        );
-                    }
-                }
-
-
-                bool WithThread(
-                    uint8_t threadID,
-                    std::function<
-                        void(IThread*)
-                    > callback
-                ) {
-                    IterationGuard iteration(
-                        *this
-                    );
-
-                    ThreadRecord result{
-                        0,
-                        nullptr,
-                        0
-                    };
-
-                    _threads.WithSharedReadLock(
-                        [
-                            threadID,
-                            &result
-                        ](
-                            const std::vector<
-                                ThreadRecord
-                            >& threads
-                        ) {
-                            for (
-                                const ThreadRecord&
-                                    record :
-                                threads
-                            ) {
-                                if (
-                                    record.id ==
-                                    threadID
-                                ) {
-                                    result =
-                                        record;
-
-                                    break;
-                                }
-                            }
-                        }
-                    );
-
-                    if (
-                        result.thread ==
-                        nullptr
-                    ) {
-                        return false;
-                    }
-
-                    callback(
-                        result.thread
-                    );
-
-                    return true;
-                }
-
-
-                IThread* GetThread(
-                    uint8_t threadID
-                ) {
-                    IThread* result =
-                        nullptr;
-
-                    _threads.WithSharedReadLock(
-                        [
-                            threadID,
-                            &result
-                        ](
-                            const std::vector<
-                                ThreadRecord
-                            >& threads
-                        ) {
-                            for (
-                                const ThreadRecord&
-                                    record :
-                                threads
-                            ) {
-                                if (
-                                    record.id ==
-                                    threadID
-                                ) {
-                                    result =
-                                        record.thread;
-
-                                    break;
-                                }
-                            }
-                        }
-                    );
-
-                    return result;
-                }
-
-
-                ThreadManagerCleanupResult
-                CleanUpWithResult() {
-                    ThreadManagerCleanupResult result;
-
-                    std::vector<ThreadRecord> snapshot;
-                    std::vector<ThreadRecord> claimedRecords;
-                    std::vector<ThreadManagerThreadSnapshot>
-                        removedSnapshots;
-                    std::vector<IThread*> deleteThreads;
-
-                    std::unique_lock<std::recursive_mutex>
-                        iterationLock(_iterationMutex);
-
-                    if (_activeIterations > 0) {
-                        _cleanupPending = true;
-
-                        result.WasDeferred = true;
-                        result.ActiveIterationCount =
-                            _activeIterations;
-
-                        result.ThreadCountBefore =
-                            GetThreadCount();
-
-                        result.ThreadCountAfter =
-                            result.ThreadCountBefore;
-
-                        iterationLock.unlock();
-
-                        _observable->CleanupDeferred(result);
-                        return result;
-                    }
-
-                    try {
-                        _threads.WithSharedReadLock(
-                            [&](const std::vector<ThreadRecord>& threads) {
-                                snapshot = threads;
-                            }
-                        );
-
-                        result.ThreadsExamined =
-                            snapshot.size();
-
-                        result.ThreadCountBefore =
-                            snapshot.size();
-
-                        _observable->CleanupStarted(result);
-
-                        // No manager list lock while calling virtual methods.
-                        for (const ThreadRecord& record : snapshot) {
-                            if (
-                                record.thread != nullptr &&
-                                record.thread->GetThreadState() ==
-                                    ThreadState::Terminated &&
-                                record.thread->
-                                    TryClaimAutomaticCleanup()
-                            ) {
-                                claimedRecords.push_back(
-                                    record
-                                );
-
-                                ++result.ThreadsClaimed;
-
-                                _observable->CleanupClaimed(
-                                    record.thread,
-                                    _snapshot(record)
-                                );
-                            }
-                        }
-
-                        _threads.WithWriteLock(
-                            [&](std::vector<ThreadRecord>& threads) {
-                                for (
-                                    const ThreadRecord& claimed :
-                                    claimedRecords
-                                ) {
-                                    const auto current =
-                                        std::find_if(
-                                            threads.begin(),
-                                            threads.end(),
-                                            [&claimed](
-                                                const ThreadRecord& record
-                                            ) {
-                                                return
-                                                    record.id ==
-                                                        claimed.id &&
-                                                    record.thread ==
-                                                        claimed.thread;
-                                            }
-                                        );
-
-                                    if (current == threads.end()) {
-                                        continue;
-                                    }
-
-                                    deleteThreads.push_back(
-                                        current->thread
-                                    );
-
-                                    removedSnapshots.push_back(
-                                        _snapshot(*current)
-                                    );
-
-                                    threads.erase(current);
-                                    ++result.ThreadsRemoved;
-                                }
-
-                                result.ThreadCountAfter =
-                                    threads.size();
-                            }
-                        );
-
-                        iterationLock.unlock();
-
-                        for (
-                            const ThreadManagerThreadSnapshot& removed :
-                            removedSnapshots
-                        ) {
-                            _observable->ThreadRemoved(
-                                removed
-                            );
-                        }
-
-                        /*
-                         * Destructors can re-enter ThreadManager. No manager
-                         * lock is held while deletion occurs.
-                         */
-                        for (IThread* thread : deleteThreads) {
-                            delete thread;
-                            ++result.ThreadsDeleted;
-                        }
-
-                        _observable->CleanupCompleted(result);
-                        return result;
-                    } catch (...) {
-                        if (iterationLock.owns_lock()) {
-                            iterationLock.unlock();
-                        }
-
-                        _observable->CleanupFailed(
-                            result,
-                            std::current_exception()
-                        );
-
-                        throw;
-                    }
-                }
-
-
-                void CleanUp() {
-                    static_cast<void>(
-                        CleanUpWithResult()
-                    );
-                }
-
-
-                std::vector<
-                    ThreadInitializationResult
-                > InitializeWithResults() {
-                    IterationGuard iteration(
-                        *this
-                    );
-
-                    std::vector<
-                        ThreadRecord
-                    > snapshot;
-
-                    std::vector<
-                        ThreadInitializationResult
-                    > results;
-
-                    _threads.WithSharedReadLock(
-                        [&snapshot](
-                            const std::vector<
-                                ThreadRecord
-                            >& threads
-                        ) {
-                            snapshot = threads;
-                        }
-                    );
-
-                    results.reserve(
-                        snapshot.size()
-                    );
-
-                    for (
-                        const ThreadRecord&
-                            record :
-                        snapshot
-                    ) {
-                        ThreadInitializationStatus
-                            status =
-                                ThreadInitializationStatus::
-                                    InitializationException;
-
-                        try {
-                            status =
-                                record.thread->
-                                    Initialize();
-                        } catch (...) {
-                            // Custom IThread implementations do not have to
-                            // provide Thread's internal exception containment.
-                        }
-
-                        results.push_back({
-                            record.id,
-                            status
-                        });
-                    }
-
-                    ThreadManagerInitializationResult summary;
-
-                    summary.ThreadsExamined =
-                        results.size();
-
-                    for (
-                        const ThreadInitializationResult& result :
-                        results
-                    ) {
-                        if (
-                            result.status ==
-                            ThreadInitializationStatus::Success
-                        ) {
-                            ++summary.ThreadsInitializedSuccessfully;
-                        } else {
-                            ++summary.ThreadsInitializationFailed;
-                        }
-                    }
-
-                    _observable->InitializationCompleted(
-                        summary
-                    );
-
-                    return results;
-                }
-
-
-                void Initialize() {
-                    static_cast<void>(
-                        InitializeWithResults()
-                    );
-                }
-
-
-                Observable::ObserverHandlePtr
-                RegisterObserver(
-                    IThreadManagerObserver* observer
-                ) {
-                    return
-                        _observable->RegisterObserver(
-                            observer
-                        );
-                }
-
-
-                void UnregisterObserver(
-                    IThreadManagerObserver* observer
-                ) {
-                    _observable->UnregisterObserver(
-                        observer
-                    );
-                }
-
-
-                std::size_t GetThreadCount() {
-                    std::size_t result = 0;
-
-                    _threads.WithSharedReadLock(
-                        [&result](
-                            const std::vector<
-                                ThreadRecord
-                            >& threads
-                        ) {
-                            result =
-                                threads.size();
-                        }
-                    );
-
-                    return result;
-                }
-        };
-
+                );
+            });
+        }
+    public:
+        void ThreadRegistered(IThread* thread, const ThreadManagerThreadSnapshot& snapshot) {
+            NotifyObservers([&](IThreadManagerObserver* o){ o->OnThreadRegistered(thread, snapshot); });
+        }
+        void ThreadRegistrationFailed(IThread* thread, std::exception_ptr cause) {
+            NotifyObservers([&](IThreadManagerObserver* o){ o->OnThreadRegistrationFailed(thread, cause); });
+        }
+        void ThreadRemoved(const ThreadManagerThreadSnapshot& snapshot) {
+            NotifyObservers([&](IThreadManagerObserver* o){ o->OnThreadRemoved(snapshot); });
+        }
+        void CleanupClaimed(IThread* thread, const ThreadManagerThreadSnapshot& snapshot) {
+            NotifyObservers([&](IThreadManagerObserver* o){ o->OnThreadCleanupClaimed(thread, snapshot); });
+        }
+        void CleanupDeferred(const ThreadManagerCleanupResult& result) {
+            NotifyObservers([&](IThreadManagerObserver* o){ o->OnThreadCleanupDeferred(result); });
+        }
+        void CleanupStarted(const ThreadManagerCleanupResult& result) {
+            NotifyObservers([&](IThreadManagerObserver* o){ o->OnThreadCleanupStarted(result); });
+        }
+        void CleanupCompleted(const ThreadManagerCleanupResult& result) {
+            NotifyObservers([&](IThreadManagerObserver* o){ o->OnThreadCleanupCompleted(result); });
+        }
+        void CleanupFailed(const ThreadManagerCleanupResult& result, std::exception_ptr cause) {
+            NotifyObservers([&](IThreadManagerObserver* o){ o->OnThreadCleanupFailed(result, cause); });
+        }
+        void InitializationCompleted(const ThreadManagerInitializationResult& result) {
+            NotifyObservers([&](IThreadManagerObserver* o){ o->OnThreadManagerInitializationCompleted(result); });
+        }
+    };
+
+    struct ThreadRecord {
+        uint8_t id;
+        IThread* thread;
+        int coreID;
+        bool operator==(const ThreadRecord& other) const {
+            return id == other.id && thread == other.thread && coreID == other.coreID;
+        }
+    };
+
+    struct ThreadInitializationTarget {
+        IThread* thread;
+        uint8_t id;
+    };
+
+    struct ClaimedCleanupRecord {
+        uint8_t id;
+        IThread* thread;
+        ThreadManagerThreadSnapshot snapshot;
+        bool removed;
+    };
+
+    using ThreadRecordStorage = System::Memory::Vector<ThreadRecord, ExternalPreferred>;
+    using ThreadPointerSnapshot = System::Memory::Vector<IThread*, ExternalPreferred>;
+    using CleanupRecordStorage = System::Memory::Vector<ClaimedCleanupRecord, ExternalPreferred>;
+    using InitializationTargetStorage = System::Memory::Vector<ThreadInitializationTarget, ExternalPreferred>;
+
+public:
+    using InitializationResultStorage = System::Memory::Vector<
+        ThreadInitializationResult,
+        ExternalPreferred
+    >;
+
+private:
+    ReadWriteMutex<ThreadRecordStorage> _threads;
+    // Core rotation is modified only while the registry write lock is held, so
+    // a second synchronization object provided no additional protection.
+    int _nextCoreID = 0;
+    System::Synchronization::Mutex _iterationMutex;
+    std::size_t _activeIterations = 0;
+    bool _cleanupPending = false;
+    mutable System::Synchronization::Mutex _observableMutex;
+    std::shared_ptr<ManagerObservable> _observable;
+
+    static ThreadManagerThreadSnapshot _snapshot(const ThreadRecord& record) {
+        ThreadManagerThreadSnapshot snapshot;
+        snapshot.ThreadID = record.id;
+        snapshot.CoreID = record.coreID;
+        if (record.thread != nullptr) {
+            try { snapshot.State = record.thread->GetThreadState(); } catch (...) {}
+            try { snapshot.FreeOnTerminate = record.thread->GetFreeOnTerminate(); } catch (...) {}
+            try { snapshot.StartOnInitialize = record.thread->GetStartOnInitialize(); } catch (...) {}
+        }
+        return snapshot;
     }
 
-}
+    std::shared_ptr<ManagerObservable> ObservableSnapshot() const {
+        std::lock_guard<System::Synchronization::Mutex> lock(_observableMutex);
+        return _observable;
+    }
+
+    std::shared_ptr<ManagerObservable> EnsureObservable() noexcept {
+        std::lock_guard<System::Synchronization::Mutex> lock(_observableMutex);
+        if (_observable) return _observable;
+        try {
+            _observable = System::Memory::MakeShared<ManagerObservable, ExternalPreferred>();
+        } catch (...) {
+            return {};
+        }
+        return _observable;
+    }
+
+    template<typename TNotification>
+    void NotifyIfObserved(TNotification&& notification) {
+        auto observable = ObservableSnapshot();
+        if (observable) notification(*observable);
+    }
+
+    void _beginIteration() {
+        std::lock_guard<System::Synchronization::Mutex> lock(_iterationMutex);
+        ++_activeIterations;
+    }
+
+    void _endIteration() {
+        bool runDeferredCleanup = false;
+        {
+            std::lock_guard<System::Synchronization::Mutex> lock(_iterationMutex);
+            if (_activeIterations > 0) --_activeIterations;
+            if (_activeIterations == 0 && _cleanupPending) {
+                _cleanupPending = false;
+                runDeferredCleanup = true;
+            }
+        }
+        if (runDeferredCleanup) CleanUp();
+    }
+
+    class IterationGuard {
+        ThreadManager& _manager;
+    public:
+        explicit IterationGuard(ThreadManager& manager) : _manager(manager) {
+            _manager._beginIteration();
+        }
+        ~IterationGuard() { _manager._endIteration(); }
+        IterationGuard(const IterationGuard&) = delete;
+        IterationGuard& operator=(const IterationGuard&) = delete;
+    };
+
+    static int _getCoreCount() {
+        const uint32_t count = System::Execution::Provider().ProcessorCount();
+        return count > 0 ? static_cast<int>(count) : 1;
+    }
+
+protected:
+    /// <summary>Constructs the singleton manager without allocating dynamic storage.</summary>
+    ThreadManager() : _threads(ThreadRecordStorage{}) {}
+
+public:
+    /// <summary>Returns the process-wide thread manager singleton without heap-allocating the manager itself.</summary>
+    static ThreadManager* GetInstance() {
+        static ThreadManager instance;
+        return &instance;
+    }
+
+    /// <summary>Registers a thread and assigns it to a processor core.</summary>
+    int AddThread(IThread* thread, uint8_t* assignedThreadID = nullptr) {
+        try {
+            if (thread == nullptr) throw ThreadInvalidRegistrationException();
+            ThreadRecord resolved{0, nullptr, 0};
+
+            _threads.WithSharedReadLock([&](const auto& threads) {
+                const auto existing = std::find_if(
+                    threads.begin(), threads.end(),
+                    [thread](const ThreadRecord& record){ return record.thread == thread; }
+                );
+                if (existing != threads.end()) resolved = *existing;
+            });
+
+            if (resolved.thread != nullptr) {
+                if (assignedThreadID != nullptr) *assignedThreadID = resolved.id;
+                return resolved.coreID;
+            }
+
+            bool inserted = false;
+            const uint8_t requestedThreadID =
+                assignedThreadID == nullptr ? thread->GetThreadID() : 0;
+
+            _threads.WithWriteLock([&](auto& threads) {
+                const auto existing = std::find_if(
+                    threads.begin(), threads.end(),
+                    [thread](const ThreadRecord& record){ return record.thread == thread; }
+                );
+                if (existing != threads.end()) {
+                    resolved = *existing;
+                    return;
+                }
+
+                uint8_t recordID = requestedThreadID;
+                if (assignedThreadID != nullptr) {
+                    bool assigned = false;
+                    for (unsigned int candidate = 1;
+                         candidate <= std::numeric_limits<uint8_t>::max(); ++candidate) {
+                        const uint8_t candidateID = static_cast<uint8_t>(candidate);
+                        const bool inUse = std::any_of(
+                            threads.begin(), threads.end(),
+                            [candidateID](const ThreadRecord& record){ return record.id == candidateID; }
+                        );
+                        if (!inUse) { recordID = candidateID; assigned = true; break; }
+                    }
+                    if (!assigned) {
+                        const bool zeroInUse = std::any_of(
+                            threads.begin(), threads.end(),
+                            [](const ThreadRecord& record){ return record.id == 0; }
+                        );
+                        if (!zeroInUse) { recordID = 0; assigned = true; }
+                    }
+                    if (!assigned) throw ThreadLimitExceededException();
+                } else {
+                    const bool idInUse = std::any_of(
+                        threads.begin(), threads.end(),
+                        [recordID](const ThreadRecord& record){ return record.id == recordID; }
+                    );
+                    if (idInUse) throw ThreadDuplicateIDException(recordID);
+                }
+
+                const int coreCount = _getCoreCount();
+                const int useCore = _nextCoreID % coreCount;
+                threads.push_back({recordID, thread, useCore});
+                _nextCoreID = (useCore + 1) % coreCount;
+                resolved = {recordID, thread, useCore};
+                inserted = true;
+            });
+
+            if (assignedThreadID != nullptr) *assignedThreadID = resolved.id;
+            if (inserted) {
+                NotifyIfObserved([&](ManagerObservable& observable) {
+                    observable.ThreadRegistered(thread, _snapshot(resolved));
+                });
+            }
+            return resolved.coreID;
+        } catch (...) {
+            auto cause = std::current_exception();
+            NotifyIfObserved([&](ManagerObservable& observable) {
+                observable.ThreadRegistrationFailed(thread, cause);
+            });
+            throw;
+        }
+    }
+
+    /// <summary>Removes the specified thread instance from the registry without deleting it.</summary>
+    void RemoveThread(IThread* thread) {
+        bool removed = false;
+        ThreadRecord removedRecord{0, nullptr, 0};
+        _threads.WithWriteLock([&](auto& threads) {
+            const auto matching = std::find_if(
+                threads.begin(), threads.end(),
+                [thread](const ThreadRecord& record){ return record.thread == thread; }
+            );
+            if (matching == threads.end()) return;
+            removedRecord = *matching;
+            threads.erase(matching);
+            removed = true;
+        });
+        if (removed) {
+            NotifyIfObserved([&](ManagerObservable& observable) {
+                observable.ThreadRemoved(_snapshot(removedRecord));
+            });
+        }
+    }
+
+    /// <summary>Removes the thread with the specified identifier from the registry without deleting it.</summary>
+    void RemoveThread(uint8_t threadID) {
+        bool removed = false;
+        ThreadRecord removedRecord{0, nullptr, 0};
+        _threads.WithWriteLock([&](auto& threads) {
+            const auto matching = std::find_if(
+                threads.begin(), threads.end(),
+                [threadID](const ThreadRecord& record){ return record.id == threadID; }
+            );
+            if (matching == threads.end()) return;
+            removedRecord = *matching;
+            threads.erase(matching);
+            removed = true;
+        });
+        if (removed) {
+            NotifyIfObserved([&](ManagerObservable& observable) {
+                observable.ThreadRemoved(_snapshot(removedRecord));
+            });
+        }
+    }
+
+    /// <summary>Invokes a callback for a stable externally backed snapshot of all currently registered threads.</summary>
+    template<typename TCallback>
+    void ForEachThread(TCallback&& callback) {
+        IterationGuard iteration(*this);
+        ThreadPointerSnapshot snapshot;
+        _threads.WithSharedReadLock([&](const auto& threads) {
+            snapshot.reserve(threads.size());
+            for (const ThreadRecord& record : threads) snapshot.push_back(record.thread);
+        });
+        for (IThread* thread : snapshot) callback(thread);
+    }
+
+    /// <summary>Invokes a concrete callback for the thread with the requested identifier when present.</summary>
+    template<typename TCallback>
+    bool WithThread(uint8_t threadID, TCallback&& callback) {
+        IterationGuard iteration(*this);
+        IThread* result = nullptr;
+        _threads.WithSharedReadLock([&](const auto& threads) {
+            for (const ThreadRecord& record : threads) {
+                if (record.id == threadID) { result = record.thread; break; }
+            }
+        });
+        if (result == nullptr) return false;
+        callback(result);
+        return true;
+    }
+
+    /// <summary>Returns the registered thread with the requested identifier, or <c>nullptr</c> when absent.</summary>
+    IThread* GetThread(uint8_t threadID) {
+        IThread* result = nullptr;
+        _threads.WithSharedReadLock([&](const auto& threads) {
+            for (const ThreadRecord& record : threads) {
+                if (record.id == threadID) { result = record.thread; break; }
+            }
+        });
+        return result;
+    }
+
+    /// <summary>Claims and deletes terminated threads that opted into automatic cleanup.</summary>
+    ThreadManagerCleanupResult CleanUpWithResult() {
+        ThreadManagerCleanupResult result;
+        ThreadRecordStorage snapshot;
+        CleanupRecordStorage claimedRecords;
+        std::unique_lock<System::Synchronization::Mutex> iterationLock(_iterationMutex);
+
+        if (_activeIterations > 0) {
+            _cleanupPending = true;
+            result.WasDeferred = true;
+            result.ActiveIterationCount = _activeIterations;
+            result.ThreadCountBefore = GetThreadCount();
+            result.ThreadCountAfter = result.ThreadCountBefore;
+            iterationLock.unlock();
+            NotifyIfObserved([&](ManagerObservable& observable) {
+                observable.CleanupDeferred(result);
+            });
+            return result;
+        }
+
+        try {
+            _threads.WithSharedReadLock([&](const auto& threads) {
+                snapshot.reserve(threads.size());
+                snapshot.insert(snapshot.end(), threads.begin(), threads.end());
+            });
+            result.ThreadsExamined = snapshot.size();
+            result.ThreadCountBefore = snapshot.size();
+            NotifyIfObserved([&](ManagerObservable& observable) {
+                observable.CleanupStarted(result);
+            });
+
+            claimedRecords.reserve(snapshot.size());
+            for (const ThreadRecord& record : snapshot) {
+                if (record.thread != nullptr &&
+                    record.thread->GetThreadState() == ThreadState::Terminated &&
+                    record.thread->TryClaimAutomaticCleanup()) {
+                    claimedRecords.push_back({record.id, record.thread, _snapshot(record), false});
+                    ++result.ThreadsClaimed;
+                    NotifyIfObserved([&](ManagerObservable& observable) {
+                        observable.CleanupClaimed(record.thread, claimedRecords.back().snapshot);
+                    });
+                }
+            }
+
+            ThreadRecordStorage{}.swap(snapshot);
+
+            _threads.WithWriteLock([&](auto& threads) {
+                for (ClaimedCleanupRecord& claimed : claimedRecords) {
+                    const auto current = std::find_if(
+                        threads.begin(), threads.end(),
+                        [&claimed](const ThreadRecord& record) {
+                            return record.id == claimed.id && record.thread == claimed.thread;
+                        }
+                    );
+                    if (current == threads.end()) continue;
+                    threads.erase(current);
+                    claimed.removed = true;
+                    ++result.ThreadsRemoved;
+                }
+                result.ThreadCountAfter = threads.size();
+            });
+
+            iterationLock.unlock();
+            for (ClaimedCleanupRecord& claimed : claimedRecords) {
+                if (!claimed.removed) continue;
+                NotifyIfObserved([&](ManagerObservable& observable) {
+                    observable.ThreadRemoved(claimed.snapshot);
+                });
+                delete claimed.thread;
+                claimed.thread = nullptr;
+                ++result.ThreadsDeleted;
+            }
+
+            NotifyIfObserved([&](ManagerObservable& observable) {
+                observable.CleanupCompleted(result);
+            });
+            return result;
+        } catch (...) {
+            if (iterationLock.owns_lock()) iterationLock.unlock();
+            auto cause = std::current_exception();
+            NotifyIfObserved([&](ManagerObservable& observable) {
+                observable.CleanupFailed(result, cause);
+            });
+            throw;
+        }
+    }
+
+    /// <summary>Runs automatic cleanup and discards the detailed result.</summary>
+    void CleanUp() { static_cast<void>(CleanUpWithResult()); }
+
+    /// <summary>Initializes a snapshot of all registered threads.</summary>
+    InitializationResultStorage InitializeWithResults() {
+        IterationGuard iteration(*this);
+        InitializationTargetStorage snapshot;
+        InitializationResultStorage results;
+
+        _threads.WithSharedReadLock([&](const auto& threads) {
+            snapshot.reserve(threads.size());
+            for (const ThreadRecord& record : threads) snapshot.push_back({record.thread, record.id});
+        });
+        results.reserve(snapshot.size());
+
+        for (const ThreadInitializationTarget& target : snapshot) {
+            ThreadInitializationStatus status = ThreadInitializationStatus::InitializationException;
+            try { status = target.thread->Initialize(); } catch (...) {}
+            results.push_back({target.id, status});
+        }
+
+        ThreadManagerInitializationResult summary;
+        summary.ThreadsExamined = results.size();
+        for (const ThreadInitializationResult& initialization : results) {
+            if (initialization.status == ThreadInitializationStatus::Success) {
+                ++summary.ThreadsInitializedSuccessfully;
+            } else {
+                ++summary.ThreadsInitializationFailed;
+            }
+        }
+        NotifyIfObserved([&](ManagerObservable& observable) {
+            observable.InitializationCompleted(summary);
+        });
+        return results;
+    }
+
+    /// <summary>Initializes all registered threads and discards individual results.</summary>
+    void Initialize() { static_cast<void>(InitializeWithResults()); }
+
+    /// <summary>Registers an observer for manager-level lifecycle notifications.</summary>
+    Observable::ObserverHandlePtr RegisterObserver(IThreadManagerObserver* observer) {
+        if (observer == nullptr) return {};
+        auto observable = EnsureObservable();
+        return observable ? observable->RegisterObserver(observer) : Observable::ObserverHandlePtr{};
+    }
+
+    /// <summary>Unregisters a manager observer without materializing observer infrastructure when none exists.</summary>
+    void UnregisterObserver(IThreadManagerObserver* observer) {
+        auto observable = ObservableSnapshot();
+        if (observable) observable->UnregisterObserver(observer);
+    }
+
+    /// <summary>Returns the number of currently registered threads.</summary>
+    std::size_t GetThreadCount() {
+        std::size_t result = 0;
+        _threads.WithSharedReadLock([&](const auto& threads) { result = threads.size(); });
+        return result;
+    }
+};
+
+} // namespace Threads
+} // namespace ESPressio

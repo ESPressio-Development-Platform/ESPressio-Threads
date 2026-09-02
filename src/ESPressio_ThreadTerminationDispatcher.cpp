@@ -1,203 +1,141 @@
 #include "ESPressio_ThreadTerminationDispatcher.hpp"
 #include "ESPressio_Thread.hpp"
+#include "ESPressio_ThreadManager.hpp"
+#include <ESPressio_Task.hpp>
 
 namespace ESPressio {
 namespace Threads {
 
-    namespace {
+namespace {
 
-        ThreadManagerThreadSnapshot
-        SnapshotThread(
-            Thread* thread
-        ) {
-            ThreadManagerThreadSnapshot snapshot;
+ThreadManagerThreadSnapshot SnapshotThread(Thread* thread) {
+    ThreadManagerThreadSnapshot snapshot;
+    if (thread == nullptr) return snapshot;
+    snapshot.ThreadID = thread->GetThreadID();
+    snapshot.CoreID = thread->GetCoreID();
+    snapshot.State = thread->GetThreadState();
+    snapshot.FreeOnTerminate = thread->GetFreeOnTerminate();
+    snapshot.StartOnInitialize = thread->GetStartOnInitialize();
+    return snapshot;
+}
 
-            if (thread == nullptr) {
-                return snapshot;
-            }
+}
 
-            snapshot.ThreadID =
-                thread->GetThreadID();
+bool ThreadTerminationDispatcher::_initialize() {
+    std::lock_guard<System::Synchronization::Mutex> lock(_initializationMutex);
 
-            snapshot.CoreID =
-                thread->GetCoreID();
-
-            snapshot.State =
-                thread->GetThreadState();
-
-            snapshot.FreeOnTerminate =
-                thread->GetFreeOnTerminate();
-
-            snapshot.StartOnInitialize =
-                thread->GetStartOnInitialize();
-
-            return snapshot;
-        }
-
+    if (_queue != nullptr &&
+        _taskHandle != System::Execution::InvalidExecutionHandle) {
+        return true;
     }
 
+    auto queue = System::Queue::Create<DispatchRecord>(
+        ESPRESSIO_THREAD_TERMINATION_QUEUE_LENGTH
+    );
 
-    ThreadTerminationDispatcher::
-    ThreadTerminationDispatcher() {
-        _queue =
-            xQueueCreate(
-                ESPRESSIO_THREAD_TERMINATION_QUEUE_LENGTH,
-                sizeof(DispatchRecord)
-            );
-
-        if (_queue == nullptr) {
-            _observable->Initialized(false);
-            return;
-        }
-
-        const BaseType_t result =
-            xTaskCreate(
-                _taskEntry,
-                "threadTerminationDispatcher",
-                ESPRESSIO_THREAD_TERMINATION_DISPATCHER_STACK_SIZE,
-                this,
-                ESPRESSIO_THREAD_TERMINATION_DISPATCHER_PRIORITY,
-                &_taskHandle
-            );
-
-        if (result != pdPASS) {
-            vQueueDelete(_queue);
-
-            _queue = nullptr;
-            _taskHandle = nullptr;
-
-            _observable->Initialized(false);
-            return;
-        }
-
-        _observable->Initialized(true);
+    if (queue == nullptr) {
+        _observable->Initialized(false);
+        return false;
     }
 
+    _queue = std::move(queue);
 
-    void ThreadTerminationDispatcher::
-    _taskEntry(
-        void* parameter
-    ) {
-        ThreadTerminationDispatcher* dispatcher =
-            static_cast<
-                ThreadTerminationDispatcher*
-            >(parameter);
+    Task::TaskConfiguration configuration;
+    configuration.Name = "threadTerminationDispatcher";
+    configuration.StackSize = ESPRESSIO_THREAD_TERMINATION_DISPATCHER_STACK_SIZE;
+    configuration.Priority = ESPRESSIO_THREAD_TERMINATION_DISPATCHER_PRIORITY;
 
-        if (dispatcher != nullptr) {
-            dispatcher->_loop();
-        }
-
-        vTaskDelete(nullptr);
+    const auto creation = Task::TaskRuntime::Create(_taskEntry, this, configuration);
+    if (!creation) {
+        _queue.reset();
+        _observable->Initialized(false);
+        return false;
     }
 
+    _taskHandle = creation.Handle;
+    _observable->Initialized(true);
+    return true;
+}
 
-    void ThreadTerminationDispatcher::
-    _loop() {
-        for (;;) {
-            DispatchRecord record;
+void ThreadTerminationDispatcher::_taskEntry(void* parameter) {
+    auto* dispatcher = static_cast<ThreadTerminationDispatcher*>(parameter);
+    if (dispatcher != nullptr) dispatcher->_loop();
+    Task::TaskRuntime::Delete(System::Execution::InvalidExecutionHandle);
+}
 
-            if (
-                xQueueReceive(
-                    _queue,
-                    &record,
-                    portMAX_DELAY
-                ) != pdTRUE ||
-                record.ThreadPointer ==
-                    nullptr
-            ) {
-                continue;
-            }
-
-            _observable->Started(
-                record.Snapshot
-            );
-
-            record.ThreadPointer->
-                _dispatchTermination();
-
-            /*
-             * Do not dereference the Thread after termination dispatch:
-             * automatic GC can now own its eventual destruction.
-             */
-            _observable->Completed(
-                record.Snapshot
-            );
-        }
-    }
-
-
-    ThreadTerminationDispatcher*
-    ThreadTerminationDispatcher::
-    GetInstance() {
-        static ThreadTerminationDispatcher
-            instance;
-
-        return &instance;
-    }
-
-
-    bool ThreadTerminationDispatcher::
-    IsAvailable() const {
-        return
-            _queue != nullptr &&
-            _taskHandle != nullptr;
-    }
-
-
-    bool ThreadTerminationDispatcher::
-    IsCurrentTask() const {
-        return
-            _taskHandle != nullptr &&
-            xTaskGetCurrentTaskHandle() ==
-                _taskHandle;
-    }
-
-
-    bool ThreadTerminationDispatcher::
-    Dispatch(
-        Thread* thread
-    ) {
-        if (
-            !IsAvailable() ||
-            thread == nullptr
-        ) {
-            return false;
-        }
-
+void ThreadTerminationDispatcher::_loop() {
+    for (;;) {
         DispatchRecord record;
-
-        record.ThreadPointer =
-            thread;
-
-        record.Snapshot =
-            SnapshotThread(thread);
-
-        /*
-         * #67 removed invocation from a FreeRTOS task-deletion callback.
-         * Dispatch now runs from normal ESPressio lifecycle contexts, so it
-         * may safely wait for queue capacity. This prevents a terminating
-         * task from being stranded merely because the dispatcher queue is
-         * momentarily full.
-         */
-        const bool queued =
-            xQueueSend(
-                _queue,
-                &record,
-                portMAX_DELAY
-            ) == pdTRUE;
-
-        if (queued) {
-            _observable->Queued(
-                record.Snapshot
-            );
-        } else {
-            _observable->QueueFailed(
-                record.Snapshot
-            );
+        if (
+            _queue == nullptr ||
+            !_queue->Receive(&record) ||
+            record.ThreadPointer == nullptr
+        ) {
+            continue;
         }
 
-        return queued;
+        _observable->Started(record.Snapshot);
+        record.ThreadPointer->_dispatchTermination();
+        try {
+            ThreadManager::GetInstance()->CleanUpWithResult();
+        } catch (...) {
+            // Eligible objects remain manager-owned for a later cleanup pass.
+        }
+        _observable->Completed(record.Snapshot);
     }
+}
+
+ThreadTerminationDispatcher* ThreadTerminationDispatcher::GetInstance() {
+    static ThreadTerminationDispatcher instance;
+    return &instance;
+}
+
+bool ThreadTerminationDispatcher::IsAvailable() const {
+    std::lock_guard<System::Synchronization::Mutex> lock(_initializationMutex);
+    return _queue != nullptr &&
+        _taskHandle != System::Execution::InvalidExecutionHandle;
+}
+
+bool ThreadTerminationDispatcher::EnsureAvailable() {
+    return _initialize();
+}
+
+bool ThreadTerminationDispatcher::IsCurrentTask() const {
+    std::lock_guard<System::Synchronization::Mutex> lock(_initializationMutex);
+    return _taskHandle != System::Execution::InvalidExecutionHandle &&
+        Task::TaskRuntime::Current() == _taskHandle;
+}
+
+uint32_t ThreadTerminationDispatcher::GetMinimumFreeStackBytes() const {
+    std::lock_guard<System::Synchronization::Mutex> lock(_initializationMutex);
+    if (_taskHandle == System::Execution::InvalidExecutionHandle) return 0;
+    return Task::TaskRuntime::MinimumFreeStack(_taskHandle);
+}
+
+bool ThreadTerminationDispatcher::Dispatch(Thread* thread) {
+    if (thread == nullptr || !EnsureAvailable()) return false;
+
+    DispatchRecord record;
+    record.ThreadPointer = thread;
+    record.Snapshot = SnapshotThread(thread);
+
+    System::PlatformResult queued = System::PlatformResult::Failed(
+        System::PlatformStatus::Unavailable
+    );
+    {
+        std::lock_guard<System::Synchronization::Mutex> lock(_initializationMutex);
+        if (_queue != nullptr) {
+            queued = _queue->Send(
+                &record,
+                System::Synchronization::WaitForever
+            );
+        }
+    }
+
+    if (queued) _observable->Queued(record.Snapshot);
+    else _observable->QueueFailed(record.Snapshot);
+    return static_cast<bool>(queued);
+}
 
 }
 }

@@ -1,12 +1,16 @@
 {
     "name": "ESPressio-Threads",
-    "description": "Threading library for single- and multi-core ESP32 microcontrollers",
-    "keywords": "thread,threads,threading,esp,esp32,espressif,multi-threading,multi-core",
+    "description": "Portable long-lived thread lifecycle and precision scheduling for the ESPressio Development Platform",
+    "keywords": "thread,threads,threading,scheduling,precision,lifecycle,multi-core,platform-neutral,espressio",
     "homepage": "https://espressio.org",
     "authors": {
         "name": "Simon J. Stuart",
         "maintainer": true,
         "url": "https://espressio.org"
+    },
+    "build": {
+        "flags": ["-std=gnu++17"],
+        "unflags": ["-std=gnu++11"]
     },
     "repository": {
         "type": "git",
@@ -14,18 +18,28 @@
     },
     "version": "3.1.7",
     "license": "Apache-2.0",
-    "frameworks": ["arduino"],
-    "platforms": ["espressif32"],
+    "frameworks": "*",
+    "platforms": "*",
     "dependencies": [
         {
+            "name": "ESPressio-System",
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-System.git#feature/1-system-memory-policy"
+        },
+        {
+            "name": "ESPressio-Task",
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Task.git#feature/1-task-execution"
+        },
+        {
+            "name": "ESPressio-Units",
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Units.git#item_4_saturation_testing"
+        },
+        {
             "name": "ESPressio-Timing",
-            "version": ">=2.2.8 <3.0.0",
-            "url": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git#item_4_saturation_testing"
         },
         {
             "name": "ESPressio-Observable",
-            "version": ">=3.0.2 <4.0.0",
-            "url": "https://github.com/ESPressio-Development-Platform/ESPressio-Observable.git"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Observable.git#feature/16-rtti-free-observer-registry"
         }
     ]
 }

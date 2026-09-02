@@ -3,6 +3,42 @@ Threading Components of the ESPressio Development Platform.
 
 Light-weight and easy-to-use Threading for your Microcontroller development work.
 
+## Active Working-Branch Platform Architecture
+
+The `optimisation/69-resource-footprint` working line now treats ESPressio-Threads as the portable lifecycle and precision-scheduling layer above ESPressio-System and ESPressio-Task. Reusable Threads code no longer owns public/native FreeRTOS task handles, queue types, semaphore types, processor-count macros, or direct task-notification wake primitives where shared ESPressio runtime abstractions provide those capabilities.
+
+The current boundary is:
+
+```text
+Application / higher ESPressio libraries
+                |
+                v
+        ESPressio-Threads
+    lifecycle / scheduling / manager
+                |
+        +-------+-------+
+        |               |
+        v               v
+ESPressio-Task   ESPressio-System
+ task semantics   execution / queue /
+                  synchronization /
+                  processor capability
+        \               /
+         \             /
+          v           v
+        target provider
+      (ESPressio-ESP32 on ESP32)
+              |
+              v
+           FreeRTOS
+```
+
+On ESP32, FreeRTOS remains the concrete execution substrate, but its task/queue/synchronization implementation is supplied below Threads through the ESPressio-ESP32/System/Task provider stack. Threads owns long-lived Thread lifecycle, precision-thread scheduling, termination/cleanup coordination, registry semantics, priorities, affinity requests, and Thread observers; it does not require ordinary consumers to manipulate FreeRTOS handles to use those facilities.
+
+Processor-count discovery now comes through `System::Execution::Provider().ProcessorCount()`. Startup gating, task-exit synchronization, precision-scheduler wake/wait behavior, and termination-dispatch queue/execution paths consume System/Task abstractions. Public Thread configuration continues to expose ESPressio concepts such as core ID, priority, stack size, lifecycle state, and execution telemetry rather than native FreeRTOS types.
+
+The published-version sections and older examples below are retained as **3.1.7 release-history documentation** until the staged Threads release/documentation consolidation is completed. Where those historical sections describe direct FreeRTOS ownership or use native calls inside examples, they describe the published 3.1.7 line rather than the architecture of this active working branch.
+
 ## Current Source Version
 This source tree is version **3.1.7**.
 
@@ -1117,7 +1153,7 @@ Additionally, because it is a **pointer**, we require the destructor...
     delete _counter; // We need to clean up the memory here
 }
 ```
-... which ensures that the instance of the `ReadWriteMutex<int>` is destroyed when its owning `ThreadSafeThread` is destroyed. Failure to implement the destructor will result in *Memory Leaks*, so please remember to manage your memory like this properly.
+... which ensures that the instance of this `ReadWriteMutex<int>` is destroyed when its owning `ThreadSafeThread` is destroyed. Failure to implement the destructor will result in *Memory Leaks*, so please remember to manage your memory like this properly.
 
 Next, let's take a look at the `Loop()` implementation's use of `_counter`:
 ```cpp

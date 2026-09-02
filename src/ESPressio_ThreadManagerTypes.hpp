@@ -8,6 +8,7 @@
 namespace ESPressio {
 namespace Threads {
 
+    /// <summary>Stable snapshot of thread identity, placement, lifecycle, and ownership configuration.</summary>
     struct ThreadManagerThreadSnapshot {
         uint8_t ThreadID = 0;
         int CoreID = 0;
@@ -17,6 +18,7 @@ namespace Threads {
     };
 
 
+    /// <summary>Summary of one manager cleanup pass, including claims, removals, deletions, deferral, and registry counts.</summary>
     struct ThreadManagerCleanupResult {
         std::size_t ThreadsExamined = 0;
         std::size_t ThreadsClaimed = 0;
@@ -31,6 +33,7 @@ namespace Threads {
     };
 
 
+    /// <summary>Summary of one manager-wide initialization pass.</summary>
     struct ThreadManagerInitializationResult {
         std::size_t ThreadsExamined = 0;
         std::size_t ThreadsInitializedSuccessfully = 0;

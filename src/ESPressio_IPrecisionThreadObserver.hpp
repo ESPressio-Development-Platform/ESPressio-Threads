@@ -17,10 +17,12 @@ namespace ESPressio {
         >
         class PrecisionThread;
 
+        /// <summary>Number of periodic iterations skipped when a precision thread falls behind its schedule.</summary>
         using SkippedIterationCount =
             uint64_t;
 
 
+        /// <summary>Observer contract for completed precision-thread iterations.</summary>
         template<
             typename TTime = Timing::DefaultClockTime,
             typename TRepresentationTraits =
@@ -46,6 +48,7 @@ namespace ESPressio {
                     default;
 
 
+                /// <summary>Called after one scheduled iteration, including scheduled/actual timing and skipped-iteration count.</summary>
                 virtual void
                 OnPrecisionThreadIteration(
                     ThreadType*,

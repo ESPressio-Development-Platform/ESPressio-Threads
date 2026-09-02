@@ -2,18 +2,15 @@
 
 #include <ESPressio_Thread.hpp>
 #include <ESPressio_ThreadManager.hpp>
-#include <ESPressio_ThreadGarbageCollector.hpp>
 #include <ESPressio_ThreadTerminationDispatcher.hpp>
 
 #include <ESPressio_IThreadManagerObserver.hpp>
-#include <ESPressio_IThreadGarbageCollectorObserver.hpp>
 #include <ESPressio_IThreadTerminationDispatcherObserver.hpp>
 
 using namespace ESPressio;
 
 class InfrastructureObserver final :
     public Threads::IThreadManagerObserver,
-    public Threads::IThreadGarbageCollectorObserver,
     public Threads::IThreadTerminationDispatcherObserver {
 
 public:
@@ -50,20 +47,6 @@ public:
             static_cast<unsigned int>(result.ThreadsRemoved),
             static_cast<unsigned int>(result.ThreadsDeleted),
             result.WasDeferred ? 1U : 0U
-        );
-    }
-
-    void OnThreadGarbageCollectionCompleted(
-        const Threads::ThreadGarbageCollectionResult& result
-    ) override {
-        Serial.printf(
-            "GC completed: mode=%u deleted=%u\n",
-            static_cast<unsigned int>(
-                result.ExecutionMode
-            ),
-            static_cast<unsigned int>(
-                result.ManagerResult.ThreadsDeleted
-            )
         );
     }
 
@@ -106,9 +89,6 @@ Observable::ObserverHandlePtr
     managerObserverHandle;
 
 Observable::ObserverHandlePtr
-    garbageCollectorObserverHandle;
-
-Observable::ObserverHandlePtr
     terminationDispatcherObserverHandle;
 
 DemoThread* demoThread = nullptr;
@@ -124,13 +104,6 @@ void setup() {
                 &infrastructureObserver
             );
 
-    garbageCollectorObserverHandle =
-        Threads::ThreadGarbageCollector::
-            GetInstance()->
-            RegisterObserver(
-                &infrastructureObserver
-            );
-
     terminationDispatcherObserverHandle =
         Threads::ThreadTerminationDispatcher::
             GetInstance()->
@@ -139,8 +112,9 @@ void setup() {
             );
 
     /*
-     * Construct after observer registration so the manager-registration
-     * notification is visible in this example.
+     * Construct after observer registration so manager registration, normal
+     * termination dispatch, and manager-owned ReleaseOnTerminate reclamation
+     * are all visible in this example.
      */
     demoThread =
         new DemoThread();
