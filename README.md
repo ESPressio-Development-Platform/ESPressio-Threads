@@ -44,14 +44,14 @@ This source tree is version **3.1.7**.
 
 Refer to the GitHub Releases page for the latest published release/tag.
 
-Current required ESPressio baselines:
+Current required ESPressio dependencies:
 
 ```text
-Timing >= 2.2.8 < 3.0.0
-Observable >= 3.0.2 < 4.0.0
+Timing     main
+Observable main
 ```
 
-Timing 2.2.8 carries Units 0.2.7 downstream. Threads itself remains independent of ESPressio Serializable; applications that opt into `ESPressio_PrecisionThread_Serializable.hpp` use Serializable Unit time/frequency representations and the 3.1.7 release is validated against Serializable 0.11.3.
+The current Timing dependency carries Units downstream from `main`. Threads itself remains independent of ESPressio Serializable; applications that opt into `ESPressio_PrecisionThread_Serializable.hpp` should consume ESPressio Serializable from its `main` branch.
 
 ## Compatibility
 
@@ -165,7 +165,7 @@ Given that *ESPressio* Threads uses multi-tier Namespacing throughout, let's dec
 ```
 
 ### A `Thread` type...
-With the required header linked, and the namespace defined, we can now define a simple `Thread` type, which we shall call `MyFirstThread`:
+With the required header linked, and the namespace defined, we can define a simple `Thread` type, which we shall call `MyFirstThread`:
 ```cpp
 class MyFirstThread : public Thread {
     protected:
