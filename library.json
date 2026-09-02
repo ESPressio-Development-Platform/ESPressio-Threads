@@ -23,23 +23,23 @@
     "dependencies": [
         {
             "name": "ESPressio-System",
-            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-System.git#feature/1-system-memory-policy"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-System.git#main"
         },
         {
             "name": "ESPressio-Task",
-            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Task.git#feature/1-task-execution"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Task.git#main"
         },
         {
             "name": "ESPressio-Units",
-            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Units.git#item_4_saturation_testing"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Units.git#main"
         },
         {
             "name": "ESPressio-Timing",
-            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git#item_4_saturation_testing"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git#main"
         },
         {
             "name": "ESPressio-Observable",
-            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Observable.git#feature/16-rtti-free-observer-registry"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Observable.git#main"
         }
     ]
 }
