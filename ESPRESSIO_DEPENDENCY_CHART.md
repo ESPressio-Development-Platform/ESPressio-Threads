@@ -24,11 +24,11 @@ Serial        0.8.1
 
 ```text
 Threads 3.1.7
-    -> Timing >= 2.2.8 < 3.0.0
-    -> Observable >= 3.0.2 < 4.0.0
+    -> Timing main
+    -> Observable main
 
 Threads Serializable integration
-    - - -> Serializable representations transitively through Units 0.2.7
+    - - -> Serializable representations transitively through Units main
 ```
 
 Threads deliberately does **not** declare Serializable as a core package dependency. `ESPressio_PrecisionThread.hpp` remains serialization-agnostic; Serializable time/frequency traits are opt-in.
