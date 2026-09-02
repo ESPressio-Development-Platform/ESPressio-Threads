@@ -107,20 +107,14 @@ The namespace provides the following (*click on any declaration to navigate to m
 - [`ESPressio::Threads::ReadWriteMutex`](#readwritemutex)
 
 ## Platformio.ini
-You can quickly and easily add this library to your project in PlatformIO by simply including the following in your `platformio.ini` file:
+During the release restructuring, consume Threads directly from `main`:
 
 ```ini
 lib_deps =
-    espressio-development-platform/ESPressio-Threads@^3.1.7
+    https://github.com/ESPressio-Development-Platform/ESPressio-Threads.git#main
 ```
 
-Alternatively, if you want to use the bleeding-edge (effectively "Developer Integration Testing" or "DIT") sources, you can instead use:
-
-```ini
-lib_deps = 
-	https://github.com/ESPressio-Development-Platform/ESPressio-Threads.git
-```
-Please note that this will use the very latest commits pushed into the repository, so volatility is possible.
+Please note that this uses the latest commits pushed to `main`, so volatility is possible until the new platform-wide release is cut.
 
 ## Understanding Threads
 Threads enable us to perform concurrent and/or parallel processing on our microcontroller devices.
