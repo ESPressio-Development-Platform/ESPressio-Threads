@@ -43,8 +43,7 @@ jobs:
           fi
 
           grep -q 'ESPressio-Task' library.json
-          grep -q 'feature/1-task-execution' library.json
-          grep -q 'item_4_saturation_testing' library.json
+          grep -q '#main' library.json
 
   esp32-task-runtime-compile:
     runs-on: ubuntu-latest
@@ -55,27 +54,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-System
-          ref: feature/1-system-memory-policy
+          ref: main
           path: project/dependencies/ESPressio-System
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Task
-          ref: feature/1-task-execution
+          ref: main
           path: project/dependencies/ESPressio-Task
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Observable
-          ref: feature/16-rtti-free-observer-registry
+          ref: main
           path: project/dependencies/ESPressio-Observable
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Timing
-          ref: item_4_saturation_testing
+          ref: main
           path: project/dependencies/ESPressio-Timing
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Units
-          ref: item_4_saturation_testing
+          ref: main
           path: project/dependencies/ESPressio-Units
       - uses: actions/setup-python@v5
         with:
