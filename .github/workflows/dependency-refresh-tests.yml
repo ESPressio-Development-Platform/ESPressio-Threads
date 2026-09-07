@@ -14,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Timing
-          ref: structural_realignment
+          ref: structural_realignment_propagation_ESPressio-Mesh
           path: project/dependencies/ESPressio-Timing
       - uses: actions/checkout@v4
         with:
@@ -72,13 +72,32 @@ jobs:
           #include <ESPressio_Thread.hpp>
           #include <ESPressio_PrecisionThread.hpp>
           #include <ESPressio_PrecisionThread_Serializable.hpp>
+          #include <ESPressio_MonotonicClock.hpp>
+          #include <ESPressio_SystemClock.hpp>
 
           using SerializableThreadTime = ESPressio::Units::SerializableNanoSeconds<uint64_t>;
           using SerializablePrecisionThread = ESPressio::Threads::PrecisionThread<SerializableThreadTime>;
           using Traits = ESPressio::Threads::PrecisionThreadTraits<SerializableThreadTime>;
+          using DefaultPrecisionThread = ESPressio::Threads::PrecisionThread<>;
 
           static_assert(std::is_same_v<typename Traits::IterationTime, SerializableThreadTime>);
           static_assert(std::is_same_v<typename Traits::IterationFrequency, ESPressio::Units::SerializableFrequency<double>>);
+          static_assert(std::is_same_v<
+              typename DefaultPrecisionThread::ClockType,
+              ESPressio::Timing::IClock<ESPressio::Timing::DefaultClockTime>>);
+
+          class DefaultClockProbe final : public DefaultPrecisionThread {
+          protected:
+              void Iterate(IterationTime, IterationTime, ESPressio::Threads::SkippedIterationCount) override {}
+          } defaultClockProbe;
+
+          class ExplicitSystemClockProbe final : public DefaultPrecisionThread {
+          protected:
+              void Iterate(IterationTime, IterationTime, ESPressio::Threads::SkippedIterationCount) override {}
+          public:
+              ExplicitSystemClockProbe()
+                  : DefaultPrecisionThread(&ESPressio::Timing::SystemClock<>::GetInstance()) {}
+          } explicitSystemClockProbe;
 
           void setup() {
               typename Traits::SignedIterationTime signedTime =
@@ -88,6 +107,11 @@ jobs:
               (void)signedTime;
               (void)frequency;
               (void)sizeof(SerializablePrecisionThread*);
+
+              auto* expectedMonotonic = static_cast<typename DefaultPrecisionThread::ClockType*>(
+                  &ESPressio::Timing::MonotonicClock<>::GetInstance());
+              if (defaultClockProbe.GetClock() != expectedMonotonic) abort();
+              if (explicitSystemClockProbe.GetClock() != &ESPressio::Timing::SystemClock<>::GetInstance()) abort();
           }
           void loop() {}
           EOF
