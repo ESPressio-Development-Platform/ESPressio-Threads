@@ -2,6 +2,16 @@
 
 This file records changes made during the platform-abstraction tranche tracked by issue #79.
 
+## 2026-09-07
+
+- Corrected `PrecisionThread` so its default scheduling domain is the shared `Timing::MonotonicClock`, not the settable/distributed `Timing::SystemClock`.
+- Narrowed `PrecisionThread::ClockType` from `Timing::ISystemClock<TTime>` to `Timing::IClock<TTime>`; explicit custom clocks, including an explicitly requested System Clock, remain injectable.
+- The default `Timing::MonotonicClock` is a non-owning facade over Timing's process-wide `HighResolutionTimeSource`; it therefore does not allocate one hardware timer per Thread.
+- `MonotonicClock` resolves the shared high-resolution source lazily on first read so global/static `PrecisionThread` construction does not pre-empt platform provider installation during `setup()`.
+- On ESP32, `ESP32Platform::InstallSystemProviders()` installs a GPTimer-backed high-resolution counter provider. Once installed before the first Timing source read, the shared Timing high-resolution source owns one GPTimer counter consumed by every default `PrecisionThread`.
+- System Clock hard steps, slews and synchronization corrections alter only the distributed System Clock facade. They do not change the raw monotonic source used for PrecisionThread deadlines, deltas, skipped-iteration accounting or wake cadence.
+- Updated automated dependency pins so the Threads working branch compiles against the Timing Mesh-propagation branch carrying the monotonic clock API.
+
 ## 2026-08-27
 
 - Replaced termination-dispatcher native FreeRTOS queue/task handles with System queue and Task/System execution handles.
@@ -18,4 +28,4 @@ This file records changes made during the platform-abstraction tranche tracked b
 
 ## Boundary
 
-ESPressio-Threads owns long-lived thread lifecycle, precision scheduling and thread-manager semantics. ESPressio-System owns primitive execution/synchronization/queue capabilities; ESPressio-Task provides discrete task runtime semantics over those primitives; ESPressio-ESP32 supplies the FreeRTOS implementation for ESP32 targets.
+ESPressio-Threads owns long-lived thread lifecycle, precision scheduling and thread-manager semantics. ESPressio-System owns primitive execution/synchronization/queue capabilities; ESPressio-Task provides discrete task runtime semantics over those primitives; ESPressio-Timing owns the shared monotonic/high-resolution scheduling clock abstraction; ESPressio-ESP32 supplies the GPTimer/FreeRTOS implementations for ESP32 targets.
