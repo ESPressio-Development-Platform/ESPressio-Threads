@@ -14,8 +14,8 @@
 #include "ESPressio_Frequency.hpp"
 #include "ESPressio_IPrecisionThreadObserver.hpp"
 #include "ESPressio_PrecisionThreadTraits.hpp"
-#include "ESPressio_ISystemClock.hpp"
-#include "ESPressio_SystemClock.hpp"
+#include "ESPressio_IClock.hpp"
+#include "ESPressio_MonotonicClock.hpp"
 #include "ESPressio_TimeTraits.hpp"
 #include "ESPressio_Thread.hpp"
 #include "ESPressio_ThreadSafeObservable.hpp"
@@ -29,16 +29,24 @@ namespace Threads {
         EndToStart
     };
 
-    /// <summary>Thread base class that executes work against a clock-driven iteration schedule with timing telemetry.</summary>
+    /// <summary>
+    /// Thread base class that executes work against a monotonic clock-driven iteration schedule with timing telemetry.
+    /// </summary>
     /// <typeparam name="TTime">Public time representation used by the scheduler.</typeparam>
     /// <typeparam name="TRepresentationTraits">Traits used to construct frequency and signed-time results.</typeparam>
+    /// <remarks>
+    /// The default scheduler clock is Timing::MonotonicClock and is deliberately independent of the settable/distributed
+    /// SystemClock timeline. System-clock steps, slews and synchronization corrections therefore cannot move an ordinary
+    /// PrecisionThread schedule. Callers may still inject any explicit Timing::IClock implementation when a specialized
+    /// schedule needs a different time domain.
+    /// </remarks>
     template<typename TTime, typename TRepresentationTraits>
     class PrecisionThread : public Thread {
     public:
         using RepresentationTraits = TRepresentationTraits;
         using IterationTime = TTime;
         using TimeType = IterationTime;
-        using ClockType = Timing::ISystemClock<IterationTime>;
+        using ClockType = Timing::IClock<IterationTime>;
         using IterationFrequency = typename RepresentationTraits::IterationFrequency;
         using SignedIterationTime = typename RepresentationTraits::SignedIterationTime;
 
@@ -189,7 +197,7 @@ namespace Threads {
             SkippedIterationCount skippedIterations
         ) = 0;
 
-        /// <summary>Implements the clock-driven scheduling loop used by the underlying Thread task.</summary>
+        /// <summary>Implements the monotonic-clock-driven scheduling loop used by the underlying Thread task.</summary>
         void OnLoop() final override {
             if (_workWakeRequested.exchange(false)) {
                 OnWorkWake();
@@ -277,16 +285,20 @@ namespace Threads {
         }
 
     public:
-        /// <summary>Constructs a precision thread using the supplied clock or the default Timing system clock.</summary>
+        /// <summary>
+        /// Constructs a precision thread using the supplied clock or the process-wide shared Timing monotonic clock.
+        /// </summary>
         explicit PrecisionThread(ClockType* clock = nullptr)
             : _clock(
                 clock == nullptr
-                    ? &Timing::SystemClock<IterationTime>::GetInstance()
+                    ? static_cast<ClockType*>(&Timing::MonotonicClock<IterationTime>::GetInstance())
                     : clock
               ),
               _scheduleSignal(System::Synchronization::CreateBinarySignal()) {}
 
-        /// <summary>Constructs a precision thread with an explicit release policy and optional clock.</summary>
+        /// <summary>
+        /// Constructs a precision thread with an explicit release policy and optional scheduler clock.
+        /// </summary>
         PrecisionThread(
             ThreadReleasePolicy releasePolicy,
             ClockType* clock = nullptr
@@ -294,7 +306,7 @@ namespace Threads {
             : Thread(releasePolicy),
               _clock(
                 clock == nullptr
-                    ? &Timing::SystemClock<IterationTime>::GetInstance()
+                    ? static_cast<ClockType*>(&Timing::MonotonicClock<IterationTime>::GetInstance())
                     : clock
               ),
               _scheduleSignal(System::Synchronization::CreateBinarySignal()) {}
