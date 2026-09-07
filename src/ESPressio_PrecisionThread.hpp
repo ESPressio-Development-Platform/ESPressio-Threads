@@ -159,9 +159,15 @@ namespace Threads {
         }
 
         static uint32_t _getWaitMilliseconds(uint64_t remainingNanoseconds) {
-            uint64_t milliseconds =
-                remainingNanoseconds / Timing::NanosecondsPerMillisecond;
-            if (milliseconds == 0) return 0;
+            if (remainingNanoseconds == 0U) return 0U;
+            // Platform scheduling waits are millisecond-granularity. Round a positive
+            // fractional millisecond UP rather than down to zero; returning zero here
+            // turns a high-priority PrecisionThread into a busy yield-loop for the last
+            // sub-millisecond of every period. The signal wait is interruptible by Bump()
+            // and WakeForWork(), so asynchronous work still wakes promptly.
+            const uint64_t oneMillisecond = Timing::NanosecondsPerMillisecond;
+            uint64_t milliseconds = remainingNanoseconds / oneMillisecond;
+            if ((remainingNanoseconds % oneMillisecond) != 0U) ++milliseconds;
             milliseconds = std::min<uint64_t>(milliseconds, UINT32_MAX - 1ULL);
             return static_cast<uint32_t>(milliseconds);
         }
