@@ -11,7 +11,14 @@ namespace ESPressio {
 
         /// <summary>Precision-thread representation policy preserving Serializable Unit wrappers when the iteration time type is serializable.</summary>
         /// <remarks>This specialization is opt-in through this header so the core Threads library remains serialization-agnostic.</remarks>
-        template<
+                /**
+         * ESPressio Memory Audit
+         * Members: none (standalone empty object occupies 1 byte; an eligible empty base may be optimized to 0 bytes).
+         * Total Memory: 1 bytes [0 bytes dynamic allocation]
+         * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
+         * End ESPressio Memory Audit
+         */
+template<
             typename TValue,
             Units::UnitOrderOfMagnitude TMagnitude
         >

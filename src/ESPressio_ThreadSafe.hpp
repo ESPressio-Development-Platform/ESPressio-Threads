@@ -35,9 +35,9 @@ namespace Threads {
 /// <summary>Common synchronized-value contract supporting copy access, try operations, and callback-based read/write locking.</summary>
 /**
  * ESPressio Memory Audit
- * Members: none; polymorphic interface/object includes vptr storage where not supplied by a base.
+ * Members: none; polymorphic/virtual-base object metadata is included in the total.
  * Total Memory: 4 bytes [0 bytes dynamic allocation]
- * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
  * End ESPressio Memory Audit
  */
 template <typename T>
@@ -70,9 +70,9 @@ public:
 /// <summary>Optional comparison and change callbacks used by synchronized-value implementations.</summary>
 /**
  * ESPressio Memory Audit
- * Members: none (empty object still occupies at least 1 byte unless empty-base optimisation applies).
- * Total Memory: 0 bytes [0 bytes dynamic allocation]
- * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Members: none (standalone empty object occupies 1 byte; an eligible empty base may be optimized to 0 bytes).
+ * Total Memory: 1 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
  * End ESPressio Memory Audit
  */
 template <typename T>
@@ -93,10 +93,10 @@ public:
  * Inherited Memory Total: 4 bytes [0 bytes dynamic allocation]
  * Members:
  * - _value (T): sizeof(T) [0 bytes dynamic allocation]
- * - _mutex (System::Synchronization::Mutex): 4 bytes known bases + sizeof(T) + sizeof(System::Synchronization::Mutex) + sizeof(CallbackStorage) [0 bytes dynamic allocation]
- * - _callbacks (CallbackStorage): sizeof(CallbackStorage) [0 bytes dynamic allocation]
- * Total Memory: 4 bytes known bases + sizeof(T) + 4 bytes known bases + sizeof(T) + sizeof(System::Synchronization::Mutex) + sizeof(CallbackStorage) + sizeof(CallbackStorage) [0 bytes dynamic allocation]
- * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * - _mutex (System::Synchronization::Mutex): 20 bytes [_owned: owned object: 4 bytes; _fallback: _mutex: native synchronization state may allocate platform resources lazily]
+ * - _callbacks (CallbackStorage): 8 bytes [owned object: 1 bytes]
+ * Total Memory: 32 bytes known/aligned storage + sizeof(T) [_mutex: _owned: owned object: 4 bytes; _mutex: _fallback: _mutex: native synchronization state may allocate platform resources lazily; _callbacks: owned object: 1 bytes]
+ * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
  * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
  * End ESPressio Memory Audit
  */
@@ -243,10 +243,10 @@ public:
  * Inherited Memory Total: 4 bytes [0 bytes dynamic allocation]
  * Members:
  * - _value (T): sizeof(T) [0 bytes dynamic allocation]
- * - _mutex (System::Synchronization::ReadWriteLock): sizeof(System::Synchronization::ReadWriteLock) [0 bytes dynamic allocation]
- * - _callbacks (CallbackStorage): sizeof(CallbackStorage) [0 bytes dynamic allocation]
- * Total Memory: 4 bytes known bases + sizeof(T) + sizeof(System::Synchronization::ReadWriteLock) + sizeof(CallbackStorage) [0 bytes dynamic allocation]
- * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * - _mutex (System::Synchronization::ReadWriteLock): 20 bytes [_owned: owned object: 4 bytes; _fallback: _mutex: native synchronization state may allocate platform resources lazily]
+ * - _callbacks (CallbackStorage): 8 bytes [owned object: 1 bytes]
+ * Total Memory: 32 bytes known/aligned storage + sizeof(T) [_mutex: _owned: owned object: 4 bytes; _mutex: _fallback: _mutex: native synchronization state may allocate platform resources lazily; _callbacks: owned object: 1 bytes]
+ * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
  * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
  * End ESPressio Memory Audit
  */
