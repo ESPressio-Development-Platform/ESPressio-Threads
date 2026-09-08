@@ -31,9 +31,29 @@ class Thread;
 
 /// <summary>Singleton task that performs thread termination outside the terminating thread's own execution context.</summary>
 /// <remarks>Termination requests are queued and processed by a dedicated Task-backed dispatcher. Initialization/resource publication is serialized through ESPressio System synchronization.</remarks>
+/**
+ * ESPressio Memory Audit
+ * Members:
+ * - _queue (std::unique_ptr<System::Queue::IMessageQueue>): 4 bytes [owned object: sizeof(System::Queue::IMessageQueue)]
+ * - _taskHandle (Task::TaskHandle): 4 bytes [0 bytes dynamic allocation]
+ * - _initializationMutex (System::Synchronization::Mutex): 4 bytes known bases + sizeof(T) + sizeof(System::Synchronization::Mutex) + sizeof(CallbackStorage) [0 bytes dynamic allocation]
+ * Total Memory: 8 bytes known members + 4 bytes known bases + sizeof(T) + sizeof(System::Synchronization::Mutex) + sizeof(CallbackStorage) [_queue: owned object: sizeof(System::Queue::IMessageQueue)]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
 class ThreadTerminationDispatcher {
 private:
-    class DispatcherObservable final : public Observable::ThreadSafeObservable {
+/**
+ * ESPressio Memory Audit
+ * Inherited Memory Total: sizeof(Observable::ThreadSafeObservable) [0 bytes dynamic allocation]
+ * Members: none (empty object still occupies at least 1 byte unless empty-base optimisation applies).
+ * Total Memory: sizeof(Observable::ThreadSafeObservable) [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
+class DispatcherObservable final : public Observable::ThreadSafeObservable {
     private:
         template <typename TCallback>
         void NotifyObservers(TCallback callback) {
@@ -74,7 +94,17 @@ private:
         }
     };
 
-    struct DispatchRecord {
+/**
+ * ESPressio Memory Audit
+ * Members:
+ * - ThreadPointer (Thread*): 4 bytes [0 bytes dynamic allocation]
+ * - Snapshot (ThreadManagerThreadSnapshot): 16 bytes [0 bytes dynamic allocation]
+ * Total Memory: 20 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: medium; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
+struct DispatchRecord {
         Thread* ThreadPointer = nullptr;
         ThreadManagerThreadSnapshot Snapshot;
     };

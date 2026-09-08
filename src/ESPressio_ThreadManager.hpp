@@ -20,6 +20,15 @@ namespace ESPressio {
 namespace Threads {
 
 /// <summary>Captures the initialization outcome for one registered thread.</summary>
+/**
+ * ESPressio Memory Audit
+ * Members:
+ * - threadID (uint8_t): 1 bytes [0 bytes dynamic allocation]
+ * - status (ThreadInitializationStatus): 1 bytes [0 bytes dynamic allocation]
+ * Total Memory: 2 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * End ESPressio Memory Audit
+ */
 struct ThreadInitializationResult {
     uint8_t threadID;
     ThreadInitializationStatus status;
@@ -27,12 +36,36 @@ struct ThreadInitializationResult {
 
 /// <summary>Owns the registry and lifecycle coordination for ESPressio threads.</summary>
 /// <remarks>The manager assigns cores, initializes registered threads, coordinates automatic cleanup, and publishes manager-level lifecycle observations. Runtime synchronization is routed through ESPressio System and variable-size storage prefers external memory.</remarks>
+/**
+ * ESPressio Memory Audit
+ * Members:
+ * - _threads (ReadWriteMutex<ThreadRecordStorage>): 4 bytes known bases + sizeof(T) + sizeof(System::Synchronization::ReadWriteLock) + sizeof(CallbackStorage) [0 bytes dynamic allocation]
+ * - _nextCoreID (int): 4 bytes [0 bytes dynamic allocation]
+ * - _iterationMutex (System::Synchronization::Mutex): 4 bytes known bases + sizeof(T) + sizeof(System::Synchronization::Mutex) + sizeof(CallbackStorage) [0 bytes dynamic allocation]
+ * - _activeIterations (std::size_t): 4 bytes [0 bytes dynamic allocation]
+ * - _cleanupPending (bool): 1 bytes [0 bytes dynamic allocation]
+ * - _observableMutex (System::Synchronization::Mutex): 4 bytes known bases + sizeof(T) + sizeof(System::Synchronization::Mutex) + sizeof(CallbackStorage) [0 bytes dynamic allocation]
+ * - _observable (std::shared_ptr<ManagerObservable>): 8 bytes [shared control block (~12+ bytes) and, when owning separately, object sizeof(Observable::ThreadSafeObservable)]
+ * Total Memory: 17 bytes known members + 4 bytes known bases + sizeof(T) + sizeof(System::Synchronization::ReadWriteLock) + sizeof(CallbackStorage) + 4 bytes known bases + sizeof(T) + sizeof(System::Synchronization::Mutex) + sizeof(CallbackStorage) + 4 bytes known bases + sizeof(T) + sizeof(System::Synchronization::Mutex) + sizeof(CallbackStorage) [_observable: shared control block (~12+ bytes) and, when owning separately, object sizeof(Observable::ThreadSafeObservable)]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
 class ThreadManager {
 private:
     static constexpr auto ExternalPreferred =
         System::Memory::MemoryPolicy::ExternalPreferred;
 
-    class ManagerObservable final : public Observable::ThreadSafeObservable {
+/**
+ * ESPressio Memory Audit
+ * Inherited Memory Total: sizeof(Observable::ThreadSafeObservable) [0 bytes dynamic allocation]
+ * Members: none (empty object still occupies at least 1 byte unless empty-base optimisation applies).
+ * Total Memory: sizeof(Observable::ThreadSafeObservable) [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
+class ManagerObservable final : public Observable::ThreadSafeObservable {
         template<typename TCallback>
         void NotifyObservers(TCallback&& callback) {
             ExecuteNotification([&](NotificationContext& notification) {
@@ -73,7 +106,17 @@ private:
         }
     };
 
-    struct ThreadRecord {
+/**
+ * ESPressio Memory Audit
+ * Members:
+ * - id (uint8_t): 1 bytes [0 bytes dynamic allocation]
+ * - thread (IThread*): 4 bytes [0 bytes dynamic allocation]
+ * - coreID (int): 4 bytes [0 bytes dynamic allocation]
+ * Total Memory: 12 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * End ESPressio Memory Audit
+ */
+struct ThreadRecord {
         uint8_t id;
         IThread* thread;
         int coreID;
@@ -82,12 +125,33 @@ private:
         }
     };
 
-    struct ThreadInitializationTarget {
+/**
+ * ESPressio Memory Audit
+ * Members:
+ * - thread (IThread*): 4 bytes [0 bytes dynamic allocation]
+ * - id (uint8_t): 1 bytes [0 bytes dynamic allocation]
+ * Total Memory: 8 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * End ESPressio Memory Audit
+ */
+struct ThreadInitializationTarget {
         IThread* thread;
         uint8_t id;
     };
 
-    struct ClaimedCleanupRecord {
+/**
+ * ESPressio Memory Audit
+ * Members:
+ * - id (uint8_t): 1 bytes [0 bytes dynamic allocation]
+ * - thread (IThread*): 4 bytes [0 bytes dynamic allocation]
+ * - snapshot (ThreadManagerThreadSnapshot): 16 bytes [0 bytes dynamic allocation]
+ * - removed (bool): 1 bytes [0 bytes dynamic allocation]
+ * Total Memory: 28 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: medium; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
+struct ClaimedCleanupRecord {
         uint8_t id;
         IThread* thread;
         ThreadManagerThreadSnapshot snapshot;
@@ -168,7 +232,15 @@ private:
         if (runDeferredCleanup) CleanUp();
     }
 
-    class IterationGuard {
+/**
+ * ESPressio Memory Audit
+ * Members:
+ * - _manager (ThreadManager&): 4 bytes [0 bytes dynamic allocation]
+ * Total Memory: 4 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * End ESPressio Memory Audit
+ */
+class IterationGuard {
         ThreadManager& _manager;
     public:
         explicit IterationGuard(ThreadManager& manager) : _manager(manager) {

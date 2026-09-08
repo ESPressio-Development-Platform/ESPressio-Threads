@@ -13,7 +13,14 @@ namespace ESPressio {
     namespace Threads {
 
         /// <summary>Lifecycle state of an ESPressio thread.</summary>
-        enum ThreadState {
+/**
+ * ESPressio Memory Audit
+ * Underlying storage: 4 bytes
+ * Total Memory: 4 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * End ESPressio Memory Audit
+ */
+enum ThreadState {
             Uninitialized,
             Initialized,
             Running,
@@ -23,7 +30,23 @@ namespace ESPressio {
             Destroyed
         };
         /// <summary>Detailed outcome returned when initializing or starting a thread task.</summary>
-        enum class ThreadInitializationStatus : uint8_t {
+/**
+ * ESPressio Memory Audit
+ * Underlying storage: 1 bytes
+ * Total Memory: 1 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * End ESPressio Memory Audit
+ */
+enum
+/**
+ * ESPressio Memory Audit
+ * Inherited Memory Total: 1 bytes [0 bytes dynamic allocation]
+ * Members: none (empty object still occupies at least 1 byte unless empty-base optimisation applies).
+ * Total Memory: 1 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * End ESPressio Memory Audit
+ */
+class ThreadInitializationStatus : uint8_t {
             Success,
             AlreadyInitialized,
             InvalidState,
@@ -36,7 +59,16 @@ namespace ESPressio {
             InitializationException
         };
         /// <summary>Base exception for ESPressio Threads lifecycle and execution failures.</summary>
-        class ThreadException : public std::runtime_error {
+/**
+ * ESPressio Memory Audit
+ * Inherited Memory Total: sizeof(std::runtime_error) [0 bytes dynamic allocation]
+ * Members: none (empty object still occupies at least 1 byte unless empty-base optimisation applies).
+ * Total Memory: sizeof(std::runtime_error) [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
+class ThreadException : public std::runtime_error {
             public:
                 explicit ThreadException(const char* message)
                     : std::runtime_error(message) {}
@@ -45,7 +77,16 @@ namespace ESPressio {
                     : std::runtime_error(message) {}
         };
         /// <summary>Base exception for thread registration failures.</summary>
-        class ThreadRegistrationException : public ThreadException {
+/**
+ * ESPressio Memory Audit
+ * Inherited Memory Total: sizeof(std::runtime_error) [0 bytes dynamic allocation]
+ * Members: none (empty object still occupies at least 1 byte unless empty-base optimisation applies).
+ * Total Memory: sizeof(std::runtime_error) [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
+class ThreadRegistrationException : public ThreadException {
             public:
                 explicit ThreadRegistrationException(const char* message)
                     : ThreadException(message) {}
@@ -55,7 +96,17 @@ namespace ESPressio {
                 ) : ThreadException(message) {}
         };
         /// <summary>Indicates that a requested thread identifier is already registered.</summary>
-        class ThreadDuplicateIDException :
+/**
+ * ESPressio Memory Audit
+ * Inherited Memory Total: sizeof(std::runtime_error) [0 bytes dynamic allocation]
+ * Members:
+ * - _threadID (uint8_t): 1 bytes [0 bytes dynamic allocation]
+ * Total Memory: sizeof(std::runtime_error) + 1 bytes known members [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
+class ThreadDuplicateIDException :
             public ThreadRegistrationException {
             private:
                 uint8_t _threadID;
@@ -74,7 +125,16 @@ namespace ESPressio {
         };
 
         /// <summary>Indicates an attempt to register a null thread pointer.</summary>
-        class ThreadInvalidRegistrationException :
+/**
+ * ESPressio Memory Audit
+ * Inherited Memory Total: sizeof(std::runtime_error) [0 bytes dynamic allocation]
+ * Members: none (empty object still occupies at least 1 byte unless empty-base optimisation applies).
+ * Total Memory: sizeof(std::runtime_error) [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
+class ThreadInvalidRegistrationException :
             public ThreadRegistrationException {
             public:
                 ThreadInvalidRegistrationException()
@@ -83,7 +143,16 @@ namespace ESPressio {
                     ) {}
         };
         /// <summary>Indicates that the maximum number of registered thread identifiers has been exhausted.</summary>
-        class ThreadLimitExceededException :
+/**
+ * ESPressio Memory Audit
+ * Inherited Memory Total: sizeof(std::runtime_error) [0 bytes dynamic allocation]
+ * Members: none (empty object still occupies at least 1 byte unless empty-base optimisation applies).
+ * Total Memory: sizeof(std::runtime_error) [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
+class ThreadLimitExceededException :
             public ThreadRegistrationException {
             public:
                 ThreadLimitExceededException()
@@ -93,7 +162,17 @@ namespace ESPressio {
         };
 
         /// <summary>Wraps an exception escaping a thread's <c>OnLoop()</c> execution.</summary>
-        class ThreadExecutionException : public ThreadException {
+/**
+ * ESPressio Memory Audit
+ * Inherited Memory Total: sizeof(std::runtime_error) [0 bytes dynamic allocation]
+ * Members:
+ * - _cause (std::exception_ptr): sizeof(std::exception_ptr) [0 bytes dynamic allocation]
+ * Total Memory: sizeof(std::runtime_error) + sizeof(std::exception_ptr) [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
+class ThreadExecutionException : public ThreadException {
             private:
                 std::exception_ptr _cause;
             public:
@@ -114,7 +193,14 @@ namespace ESPressio {
                 }
         };
         /// <summary>Common lifecycle, configuration, and callback contract implemented by all ESPressio thread types.</summary>
-        class IThread  {
+/**
+ * ESPressio Memory Audit
+ * Members: none; polymorphic interface/object includes vptr storage where not supplied by a base.
+ * Total Memory: 4 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * End ESPressio Memory Audit
+ */
+class IThread  {
             private:
                 std::atomic<bool> _automaticCleanupClaimed{false};
 

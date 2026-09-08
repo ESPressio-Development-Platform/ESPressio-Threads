@@ -12,7 +12,14 @@ namespace ESPressio {
         /// <summary>Public Unit representation policy used by <c>PrecisionThread</c> for iteration time, signed overrun/remaining time, and measured frequency.</summary>
         /// <typeparam name="TTime">Public time representation used for iteration timestamps and deltas.</typeparam>
         /// <remarks>The default policy uses ordinary ESPressio Units and introduces no Serializable dependency.</remarks>
-        template<typename TTime>
+/**
+ * ESPressio Memory Audit
+ * Members: none (empty object still occupies at least 1 byte unless empty-base optimisation applies).
+ * Total Memory: 0 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * End ESPressio Memory Audit
+ */
+template<typename TTime>
         struct PrecisionThreadTraits {
             /// <summary>Public iteration timestamp/delta type.</summary>
             using IterationTime = TTime;

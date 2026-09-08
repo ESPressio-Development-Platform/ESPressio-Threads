@@ -9,6 +9,15 @@
 
 using namespace ESPressio;
 
+/**
+ * ESPressio Memory Audit
+ * Inherited Memory Total: sizeof(Observable::IObserver) + 4 bytes vptr + sizeof(Observable::IObserver) + 4 bytes vptr [0 bytes dynamic allocation]
+ * Members: none (empty object still occupies at least 1 byte unless empty-base optimisation applies).
+ * Total Memory: sizeof(Observable::IObserver) + 4 bytes vptr + sizeof(Observable::IObserver) + 4 bytes vptr [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
 class InfrastructureObserver final :
     public Threads::IThreadManagerObserver,
     public Threads::IThreadTerminationDispatcherObserver {
@@ -61,6 +70,17 @@ public:
 };
 
 
+/**
+ * ESPressio Memory Audit
+ * Inherited Memory Total: sizeof(IThread) + 18 bytes known members + sizeof(System::Synchronization::Mutex) + sizeof(System::Synchronization::RecursiveMutex) + sizeof(System::Synchronization::Mutex) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadInitializationFailedEvent>) + sizeof(StableCallback<TOnThreadExecutionFailedEvent>) + sizeof(StableCallback<TOnThreadStateChangeEvent>) + 4 bytes vptr [Thread: _taskExited: owned object: sizeof(System::Synchronization::ISignal); Thread: _taskStartGate: owned object: sizeof(System::Synchronization::ISignal); Thread: _lifecycleObservable: shared control block (~12+ bytes) and, when owning separately, object sizeof(Observable::ThreadSafeObservable)]
+ * Requires Stack/Heap Preallocation
+ * Members:
+ * - _iterations (uint8_t): 1 bytes [0 bytes dynamic allocation]
+ * Total Memory: sizeof(IThread) + 18 bytes known members + sizeof(System::Synchronization::Mutex) + sizeof(System::Synchronization::RecursiveMutex) + sizeof(System::Synchronization::Mutex) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadInitializationFailedEvent>) + sizeof(StableCallback<TOnThreadExecutionFailedEvent>) + sizeof(StableCallback<TOnThreadStateChangeEvent>) + 4 bytes vptr + 1 bytes known members [Thread: _taskExited: owned object: sizeof(System::Synchronization::ISignal); Thread: _taskStartGate: owned object: sizeof(System::Synchronization::ISignal); Thread: _lifecycleObservable: shared control block (~12+ bytes) and, when owning separately, object sizeof(Observable::ThreadSafeObservable)]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
 class DemoThread final :
     public Threads::Thread {
 

@@ -28,16 +28,68 @@ namespace Threads {
 class ThreadTerminationDispatcher;
 
 /// <summary>Controls when a Thread becomes visible to ThreadManager.</summary>
-enum class ThreadRegistrationPolicy : uint8_t {
+/**
+ * ESPressio Memory Audit
+ * Underlying storage: 1 bytes
+ * Total Memory: 1 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * End ESPressio Memory Audit
+ */
+enum
+/**
+ * ESPressio Memory Audit
+ * Inherited Memory Total: 1 bytes [0 bytes dynamic allocation]
+ * Members: none (empty object still occupies at least 1 byte unless empty-base optimisation applies).
+ * Total Memory: 1 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * End ESPressio Memory Audit
+ */
+class ThreadRegistrationPolicy : uint8_t {
     Immediate,
     DeferredUntilInitialize
 };
 
 /// <summary>Concrete managed task implementation providing the ESPressio IThread lifecycle and observer/callback surfaces.</summary>
 /// <remarks>Thread owns an underlying platform task while initialized, serializes lifecycle transitions through ESPressio System synchronization, and defers task-exit finalization through ThreadTerminationDispatcher.</remarks>
+/**
+ * ESPressio Memory Audit
+ * Inherited Memory Total: 4 bytes [0 bytes dynamic allocation]
+ * Requires Stack/Heap Preallocation
+ * Members:
+ * - _threadID (uint8_t): 1 bytes [0 bytes dynamic allocation]
+ * - _registrationPolicy (ThreadRegistrationPolicy): 1 bytes [0 bytes dynamic allocation]
+ * - _taskExited (std::unique_ptr<System::Synchronization::ISignal>): 4 bytes [owned object: sizeof(System::Synchronization::ISignal)]
+ * - _taskStartGate (std::unique_ptr<System::Synchronization::ISignal>): 4 bytes [owned object: sizeof(System::Synchronization::ISignal)]
+ * - _taskConfigurationMutex (System::Synchronization::Mutex): 4 bytes known bases + sizeof(T) + sizeof(System::Synchronization::Mutex) + sizeof(CallbackStorage) [0 bytes dynamic allocation]
+ * - _stateTransitionMutex (System::Synchronization::RecursiveMutex): sizeof(System::Synchronization::RecursiveMutex) [0 bytes dynamic allocation]
+ * - _lifecycleObservable (std::shared_ptr<LifecycleObservable>): 8 bytes [shared control block (~12+ bytes) and, when owning separately, object sizeof(Observable::ThreadSafeObservable)]
+ * - _callbackMutex (System::Synchronization::Mutex): 4 bytes known bases + sizeof(T) + sizeof(System::Synchronization::Mutex) + sizeof(CallbackStorage) [0 bytes dynamic allocation]
+ * - _onDestroy (StableCallback<TOnThreadEvent>): sizeof(StableCallback<TOnThreadEvent>) [0 bytes dynamic allocation]
+ * - _onInitialize (StableCallback<TOnThreadEvent>): sizeof(StableCallback<TOnThreadEvent>) [0 bytes dynamic allocation]
+ * - _onStart (StableCallback<TOnThreadEvent>): sizeof(StableCallback<TOnThreadEvent>) [0 bytes dynamic allocation]
+ * - _onPause (StableCallback<TOnThreadEvent>): sizeof(StableCallback<TOnThreadEvent>) [0 bytes dynamic allocation]
+ * - _onTerminate (StableCallback<TOnThreadEvent>): sizeof(StableCallback<TOnThreadEvent>) [0 bytes dynamic allocation]
+ * - _onTerminated (StableCallback<TOnThreadEvent>): sizeof(StableCallback<TOnThreadEvent>) [0 bytes dynamic allocation]
+ * - _onInitializationFailed (StableCallback<TOnThreadInitializationFailedEvent>): sizeof(StableCallback<TOnThreadInitializationFailedEvent>) [0 bytes dynamic allocation]
+ * - _onExecutionFailed (StableCallback<TOnThreadExecutionFailedEvent>): sizeof(StableCallback<TOnThreadExecutionFailedEvent>) [0 bytes dynamic allocation]
+ * - _onStateChange (StableCallback<TOnThreadStateChangeEvent>): sizeof(StableCallback<TOnThreadStateChangeEvent>) [0 bytes dynamic allocation]
+ * Total Memory: 4 bytes known bases + 18 bytes known members + 4 bytes known bases + sizeof(T) + sizeof(System::Synchronization::Mutex) + sizeof(CallbackStorage) + sizeof(System::Synchronization::RecursiveMutex) + 4 bytes known bases + sizeof(T) + sizeof(System::Synchronization::Mutex) + sizeof(CallbackStorage) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadEvent>) + sizeof(StableCallback<TOnThreadInitializationFailedEvent>) + sizeof(StableCallback<TOnThreadExecutionFailedEvent>) + sizeof(StableCallback<TOnThreadStateChangeEvent>) [_taskExited: owned object: sizeof(System::Synchronization::ISignal); _taskStartGate: owned object: sizeof(System::Synchronization::ISignal); _lifecycleObservable: shared control block (~12+ bytes) and, when owning separately, object sizeof(Observable::ThreadSafeObservable)]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
 class Thread : public IThread {
 private:
-    class LifecycleObservable final : public Observable::ThreadSafeObservable {
+/**
+ * ESPressio Memory Audit
+ * Inherited Memory Total: sizeof(Observable::ThreadSafeObservable) [0 bytes dynamic allocation]
+ * Members: none (empty object still occupies at least 1 byte unless empty-base optimisation applies).
+ * Total Memory: sizeof(Observable::ThreadSafeObservable) [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
+ * End ESPressio Memory Audit
+ */
+class LifecycleObservable final : public Observable::ThreadSafeObservable {
     private:
         template <typename TNotification>
         void Notify(TNotification notification) {
@@ -86,7 +138,23 @@ private:
         }
     };
 
-    enum class CleanupClaim : uint8_t {
+/**
+ * ESPressio Memory Audit
+ * Underlying storage: 1 bytes
+ * Total Memory: 1 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * End ESPressio Memory Audit
+ */
+enum
+/**
+ * ESPressio Memory Audit
+ * Inherited Memory Total: 1 bytes [0 bytes dynamic allocation]
+ * Members: none (empty object still occupies at least 1 byte unless empty-base optimisation applies).
+ * Total Memory: 1 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * End ESPressio Memory Audit
+ */
+class CleanupClaim : uint8_t {
         Available,
         Manual,
         Automatic
@@ -492,7 +560,16 @@ private:
 
         configurationLock.unlock();
 
-        struct InitializationContextGuard {
+/**
+ * ESPressio Memory Audit
+ * Members:
+ * - taskHandle (std::atomic<Task::TaskHandle>&): 4 bytes [0 bytes dynamic allocation]
+ * - inProgress (std::atomic<bool>&): 4 bytes [0 bytes dynamic allocation]
+ * Total Memory: 8 bytes [0 bytes dynamic allocation]
+ * Basis: ESP32/Xtensa ILP32 reference ABI; GNU libstdc++ container control-block sizes are implementation-sensitive.
+ * End ESPressio Memory Audit
+ */
+struct InitializationContextGuard {
             std::atomic<Task::TaskHandle>& taskHandle;
             std::atomic<bool>& inProgress;
 
