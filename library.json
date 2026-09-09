@@ -31,15 +31,15 @@
         },
         {
             "name": "ESPressio-Units",
-            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Units.git#structural_realignment"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Units.git#primitives_redesign"
         },
         {
             "name": "ESPressio-Timing",
-            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git#structural_realignment_propagation_ESPressio-Mesh"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git#primitives_redesign"
         },
         {
             "name": "ESPressio-Observable",
-            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Observable.git#structural_realignment"
+            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Observable.git#primitives_redesign"
         }
     ]
 }
