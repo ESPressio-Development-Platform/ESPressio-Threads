@@ -26,12 +26,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-System
-          ref: structural_realignment
+          ref: primitives_redesign
           path: project/dependencies/ESPressio-System
       - uses: actions/checkout@v4
         with:
           repository: ESPressio-Development-Platform/ESPressio-Task
-          ref: structural_realignment
+          ref: primitives_redesign
           path: project/dependencies/ESPressio-Task
       - uses: actions/checkout@v4
         with:
@@ -111,9 +111,9 @@ jobs:
         with:
           path: project/ESPressio-Threads
       - uses: actions/checkout@v4
-        with: {repository: ESPressio-Development-Platform/ESPressio-System, ref: structural_realignment, path: project/dependencies/ESPressio-System}
+        with: {repository: ESPressio-Development-Platform/ESPressio-System, ref: primitives_redesign, path: project/dependencies/ESPressio-System}
       - uses: actions/checkout@v4
-        with: {repository: ESPressio-Development-Platform/ESPressio-Task, ref: structural_realignment, path: project/dependencies/ESPressio-Task}
+        with: {repository: ESPressio-Development-Platform/ESPressio-Task, ref: primitives_redesign, path: project/dependencies/ESPressio-Task}
       - uses: actions/checkout@v4
         with: {repository: ESPressio-Development-Platform/ESPressio-Timing, ref: primitives_redesign, path: project/dependencies/ESPressio-Timing}
       - uses: actions/checkout@v4
