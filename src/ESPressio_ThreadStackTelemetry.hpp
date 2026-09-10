@@ -11,16 +11,7 @@
 namespace ESPressio::Threads {
 
 /// <summary>Snapshot of configured thread stack size and FreeRTOS minimum-free-stack telemetry.</summary>
-/**
- * ESPressio Memory Audit
- * Members:
- * - ConfiguredBytes (uint32_t): 4 bytes [0 bytes dynamic allocation]
- * - MinimumFreeBytes (uint32_t): 4 bytes [0 bytes dynamic allocation]
- * - Available (bool): 1 bytes [0 bytes dynamic allocation]
- * Total Memory: 12 bytes [0 bytes dynamic allocation]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * End ESPressio Memory Audit
- */
+
 struct ThreadStackTelemetry {
     uint32_t ConfiguredBytes{0};
     uint32_t MinimumFreeBytes{0};

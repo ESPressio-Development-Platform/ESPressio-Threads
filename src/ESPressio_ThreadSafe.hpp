@@ -33,13 +33,7 @@ namespace ESPressio {
 namespace Threads {
 
 /// <summary>Common synchronized-value contract supporting copy access, try operations, and callback-based read/write locking.</summary>
-/**
- * ESPressio Memory Audit
- * Members: none; polymorphic/virtual-base object metadata is included in the total.
- * Total Memory: 4 bytes [0 bytes dynamic allocation]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * End ESPressio Memory Audit
- */
+
 template <typename T>
 class IThreadSafe {
 public:
@@ -68,13 +62,7 @@ public:
 };
 
 /// <summary>Optional comparison and change callbacks used by synchronized-value implementations.</summary>
-/**
- * ESPressio Memory Audit
- * Members: none (standalone empty object occupies 1 byte; an eligible empty base may be optimized to 0 bytes).
- * Total Memory: 1 bytes [0 bytes dynamic allocation]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * End ESPressio Memory Audit
- */
+
 template <typename T>
 class ThreadSafeCallbacks {
 public:
@@ -88,18 +76,7 @@ public:
 };
 
 /// <summary>System-mutex synchronized value wrapper.</summary>
-/**
- * ESPressio Memory Audit
- * Inherited Memory Total: 4 bytes [0 bytes dynamic allocation]
- * Members:
- * - _value (T): sizeof(T) [0 bytes dynamic allocation]
- * - _mutex (System::Synchronization::Mutex): 20 bytes [_owned: owned object: 4 bytes; _fallback: _mutex: native synchronization state may allocate platform resources lazily]
- * - _callbacks (CallbackStorage): 8 bytes [owned object: 1 bytes]
- * Total Memory: 32 bytes known/aligned storage + sizeof(T) [_mutex: _owned: owned object: 4 bytes; _mutex: _fallback: _mutex: native synchronization state may allocate platform resources lazily; _callbacks: owned object: 1 bytes]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
- * End ESPressio Memory Audit
- */
+
 template <typename T>
 class Mutex : public IThreadSafe<T> {
 private:
@@ -238,18 +215,7 @@ public:
 
 /// <summary>System read/write-lock synchronized value wrapper.</summary>
 /// <remarks>The active platform provider controls whether shared readers execute concurrently. ESP32 currently serializes shared and exclusive acquisition through one native FreeRTOS mutex to avoid pthread rwlock state.</remarks>
-/**
- * ESPressio Memory Audit
- * Inherited Memory Total: 4 bytes [0 bytes dynamic allocation]
- * Members:
- * - _value (T): sizeof(T) [0 bytes dynamic allocation]
- * - _mutex (System::Synchronization::ReadWriteLock): 20 bytes [_owned: owned object: 4 bytes; _fallback: _mutex: native synchronization state may allocate platform resources lazily]
- * - _callbacks (CallbackStorage): 8 bytes [owned object: 1 bytes]
- * Total Memory: 32 bytes known/aligned storage + sizeof(T) [_mutex: _owned: owned object: 4 bytes; _mutex: _fallback: _mutex: native synchronization state may allocate platform resources lazily; _callbacks: owned object: 1 bytes]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * Confidence: low; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
- * End ESPressio Memory Audit
- */
+
 template <typename T>
 class ReadWriteMutex : public IThreadSafe<T> {
 private:

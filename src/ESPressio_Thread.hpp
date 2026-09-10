@@ -28,13 +28,7 @@ namespace Threads {
 class ThreadTerminationDispatcher;
 
 /// <summary>Controls when a Thread becomes visible to ThreadManager.</summary>
-/**
- * ESPressio Memory Audit
- * Underlying storage: 1 bytes
- * Total Memory: 1 bytes [0 bytes dynamic allocation]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * End ESPressio Memory Audit
- */
+
 enum
 class ThreadRegistrationPolicy : uint8_t {
     Immediate,
@@ -43,56 +37,10 @@ class ThreadRegistrationPolicy : uint8_t {
 
 /// <summary>Concrete managed task implementation providing the ESPressio IThread lifecycle and observer/callback surfaces.</summary>
 /// <remarks>Thread owns an underlying platform task while initialized, serializes lifecycle transitions through ESPressio System synchronization, and defers task-exit finalization through ThreadTerminationDispatcher.</remarks>
-/**
- * ESPressio Memory Audit
- * Inherited Memory Total: 8 bytes [0 bytes dynamic allocation]
- * Requires Stack/Heap Preallocation
- * Members:
- * - _threadID (uint8_t): 1 bytes [0 bytes dynamic allocation]
- * - _registrationPolicy (ThreadRegistrationPolicy): 1 bytes [0 bytes dynamic allocation]
- * - _registered (std::atomic<bool>): 1 bytes [0 bytes dynamic allocation]
- * - _threadState (std::atomic<ThreadState>): 4 bytes [0 bytes dynamic allocation]
- * - _freeOnTerminate (std::atomic<bool>): 1 bytes [0 bytes dynamic allocation]
- * - _startOnInitialize (std::atomic<bool>): 1 bytes [0 bytes dynamic allocation]
- * - _taskHandle (std::atomic<Task::TaskHandle>): 4 bytes [0 bytes dynamic allocation]
- * - _initializingTaskHandle (std::atomic<Task::TaskHandle>): 4 bytes [0 bytes dynamic allocation]
- * - _initializationInProgress (std::atomic<bool>): 1 bytes [0 bytes dynamic allocation]
- * - _terminationDispatchPending (std::atomic<bool>): 1 bytes [0 bytes dynamic allocation]
- * - _taskExitFinalizationStarted (std::atomic<bool>): 1 bytes [0 bytes dynamic allocation]
- * - _cleanupClaim (std::atomic<CleanupClaim>): 1 bytes [0 bytes dynamic allocation]
- * - _taskExited (std::unique_ptr<System::Synchronization::ISignal>): 4 bytes [owned object: 4 bytes]
- * - _taskStartGate (std::unique_ptr<System::Synchronization::ISignal>): 4 bytes [owned object: 4 bytes]
- * - _taskConfigurationMutex (System::Synchronization::Mutex): 20 bytes [_owned: owned object: 4 bytes; _fallback: _mutex: native synchronization state may allocate platform resources lazily]
- * - _stateTransitionMutex (System::Synchronization::RecursiveMutex): 20 bytes [_owned: owned object: 4 bytes; _fallback: _mutex: native synchronization state may allocate platform resources lazily]
- * - _stackSize (std::atomic<uint32_t>): 4 bytes [0 bytes dynamic allocation]
- * - _priority (std::atomic<unsigned int>): 4 bytes [0 bytes dynamic allocation]
- * - _coreID (std::atomic<int>): 4 bytes [0 bytes dynamic allocation]
- * - _lifecycleObservable (std::shared_ptr<LifecycleObservable>): 8 bytes [shared control block (~12+ bytes; allocate_shared may co-locate object) + object 96 bytes; pointee: ThreadSafeObservable: Observable: IUntypedObservable: IObservable: enable_shared_from_this: embedded weak_ptr shares a control block when activated; pointee: ThreadSafeObservable: Observable: IUntypedObservable: IObservable: _lifetimeControl: shared control block (~12+ bytes; allocate_shared may co-locate object) + object 20 bytes; pointee: ThreadSafeObservable: Observable: IUntypedObservable: IObservable: _lifetimeControl: pointee: _mutex: native synchronization state may allocate platform resources lazily; pointee: ThreadSafeObservable: Observable: IUntypedObservable: IObservable: _lifetimeControl: pointee: _condition: native condition-variable state may allocate platform synchronization resources; pointee: ThreadSafeObservable: Observable: _registrations: Capacity * (12 bytes) element storage; pointee: ThreadSafeObservable: Observable: _bindings: Capacity * (12 bytes) element storage; pointee: ThreadSafeObservable: _mutex: _owned: owned object: 4 bytes; pointee: ThreadSafeObservable: _mutex: _fallback: _mutex: native synchronization state may allocate platform resources lazily; pointee: ThreadSafeObservable: _notificationMutex: _owned: owned object: 4 bytes; pointee: ThreadSafeObservable: _notificationMutex: _fallback: _mutex: native synchronization state may allocate platform resources lazily]
- * - _callbackMutex (System::Synchronization::Mutex): 20 bytes [_owned: owned object: 4 bytes; _fallback: _mutex: native synchronization state may allocate platform resources lazily]
- * - _onDestroy (StableCallback<TOnThreadEvent>): 8 bytes [shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes]
- * - _onInitialize (StableCallback<TOnThreadEvent>): 8 bytes [shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes]
- * - _onStart (StableCallback<TOnThreadEvent>): 8 bytes [shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes]
- * - _onPause (StableCallback<TOnThreadEvent>): 8 bytes [shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes]
- * - _onTerminate (StableCallback<TOnThreadEvent>): 8 bytes [shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes]
- * - _onTerminated (StableCallback<TOnThreadEvent>): 8 bytes [shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes]
- * - _onInitializationFailed (StableCallback<TOnThreadInitializationFailedEvent>): 8 bytes [shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes]
- * - _onExecutionFailed (StableCallback<TOnThreadExecutionFailedEvent>): 8 bytes [shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes]
- * - _onStateChange (StableCallback<TOnThreadStateChangeEvent>): 8 bytes [shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes]
- * Total Memory: 192 bytes [_taskExited: owned object: 4 bytes; _taskStartGate: owned object: 4 bytes; _taskConfigurationMutex: _owned: owned object: 4 bytes; _taskConfigurationMutex: _fallback: _mutex: native synchronization state may allocate platform resources lazily; _stateTransitionMutex: _owned: owned object: 4 bytes; _stateTransitionMutex: _fallback: _mutex: native synchronization state may allocate platform resources lazily; _lifecycleObservable: shared control block (~12+ bytes; allocate_shared may co-locate object) + object 96 bytes; _lifecycleObservable: pointee: ThreadSafeObservable: Observable: IUntypedObservable: IObservable: enable_shared_from_this: embedded weak_ptr shares a control block when activated; _lifecycleObservable: pointee: ThreadSafeObservable: Observable: IUntypedObservable: IObservable: _lifetimeControl: shared control block (~12+ bytes; allocate_shared may co-locate object) + object 20 bytes; _lifecycleObservable: pointee: ThreadSafeObservable: Observable: IUntypedObservable: IObservable: _lifetimeControl: pointee: _mutex: native synchronization state may allocate platform resources lazily; _lifecycleObservable: pointee: ThreadSafeObservable: Observable: IUntypedObservable: IObservable: _lifetimeControl: pointee: _condition: native condition-variable state may allocate platform synchronization resources; _lifecycleObservable: pointee: ThreadSafeObservable: Observable: _registrations: Capacity * (12 bytes) element storage; _lifecycleObservable: pointee: ThreadSafeObservable: Observable: _bindings: Capacity * (12 bytes) element storage; _lifecycleObservable: pointee: ThreadSafeObservable: _mutex: _owned: owned object: 4 bytes; _lifecycleObservable: pointee: ThreadSafeObservable: _mutex: _fallback: _mutex: native synchronization state may allocate platform resources lazily; _lifecycleObservable: pointee: ThreadSafeObservable: _notificationMutex: _owned: owned object: 4 bytes; _lifecycleObservable: pointee: ThreadSafeObservable: _notificationMutex: _fallback: _mutex: native synchronization state may allocate platform resources lazily; _callbackMutex: _owned: owned object: 4 bytes; _callbackMutex: _fallback: _mutex: native synchronization state may allocate platform resources lazily; _onDestroy: shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes; _onInitialize: shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes; _onStart: shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes; _onPause: shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes; _onTerminate: shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes; _onTerminated: shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes; _onInitializationFailed: shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes; _onExecutionFailed: shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes; _onStateChange: shared control block (~12+ bytes; allocate_shared may co-locate object) + object 4 bytes]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * Confidence: medium; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
- * End ESPressio Memory Audit
- */
+
 class Thread : public IThread {
 private:
-/**
- * ESPressio Memory Audit
- * Inherited Memory Total: 96 bytes [ThreadSafeObservable: Observable: IUntypedObservable: IObservable: enable_shared_from_this: embedded weak_ptr shares a control block when activated; ThreadSafeObservable: Observable: IUntypedObservable: IObservable: _lifetimeControl: shared control block (~12+ bytes; allocate_shared may co-locate object) + object 20 bytes; ThreadSafeObservable: Observable: IUntypedObservable: IObservable: _lifetimeControl: pointee: _mutex: native synchronization state may allocate platform resources lazily; ThreadSafeObservable: Observable: IUntypedObservable: IObservable: _lifetimeControl: pointee: _condition: native condition-variable state may allocate platform synchronization resources; ThreadSafeObservable: Observable: _registrations: Capacity * (12 bytes) element storage; ThreadSafeObservable: Observable: _bindings: Capacity * (12 bytes) element storage; ThreadSafeObservable: _mutex: _owned: owned object: 4 bytes; ThreadSafeObservable: _mutex: _fallback: _mutex: native synchronization state may allocate platform resources lazily; ThreadSafeObservable: _notificationMutex: _owned: owned object: 4 bytes; ThreadSafeObservable: _notificationMutex: _fallback: _mutex: native synchronization state may allocate platform resources lazily]
- * Members: none (standalone empty object occupies 1 byte; an eligible empty base may be optimized to 0 bytes).
- * Total Memory: 96 bytes [ThreadSafeObservable: Observable: IUntypedObservable: IObservable: enable_shared_from_this: embedded weak_ptr shares a control block when activated; ThreadSafeObservable: Observable: IUntypedObservable: IObservable: _lifetimeControl: shared control block (~12+ bytes; allocate_shared may co-locate object) + object 20 bytes; ThreadSafeObservable: Observable: IUntypedObservable: IObservable: _lifetimeControl: pointee: _mutex: native synchronization state may allocate platform resources lazily; ThreadSafeObservable: Observable: IUntypedObservable: IObservable: _lifetimeControl: pointee: _condition: native condition-variable state may allocate platform synchronization resources; ThreadSafeObservable: Observable: _registrations: Capacity * (12 bytes) element storage; ThreadSafeObservable: Observable: _bindings: Capacity * (12 bytes) element storage; ThreadSafeObservable: _mutex: _owned: owned object: 4 bytes; ThreadSafeObservable: _mutex: _fallback: _mutex: native synchronization state may allocate platform resources lazily; ThreadSafeObservable: _notificationMutex: _owned: owned object: 4 bytes; ThreadSafeObservable: _notificationMutex: _fallback: _mutex: native synchronization state may allocate platform resources lazily]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * End ESPressio Memory Audit
- */
+
 class LifecycleObservable final : public Observable::ThreadSafeObservable {
     private:
         template <typename TNotification>
@@ -142,13 +90,7 @@ class LifecycleObservable final : public Observable::ThreadSafeObservable {
         }
     };
 
-/**
- * ESPressio Memory Audit
- * Underlying storage: 1 bytes
- * Total Memory: 1 bytes [0 bytes dynamic allocation]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * End ESPressio Memory Audit
- */
+
 enum
 class CleanupClaim : uint8_t {
         Available,
@@ -556,15 +498,7 @@ private:
 
         configurationLock.unlock();
 
-/**
- * ESPressio Memory Audit
- * Members:
- * - taskHandle (std::atomic<Task::TaskHandle>&): 4 bytes [0 bytes dynamic allocation]
- * - inProgress (std::atomic<bool>&): 4 bytes [0 bytes dynamic allocation]
- * Total Memory: 8 bytes [0 bytes dynamic allocation]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * End ESPressio Memory Audit
- */
+
 struct InitializationContextGuard {
             std::atomic<Task::TaskHandle>& taskHandle;
             std::atomic<bool>& inProgress;

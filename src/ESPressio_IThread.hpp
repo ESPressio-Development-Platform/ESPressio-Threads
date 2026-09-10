@@ -13,13 +13,7 @@ namespace ESPressio {
     namespace Threads {
 
         /// <summary>Lifecycle state of an ESPressio thread.</summary>
-/**
- * ESPressio Memory Audit
- * Underlying storage: 4 bytes
- * Total Memory: 4 bytes [0 bytes dynamic allocation]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * End ESPressio Memory Audit
- */
+
 enum ThreadState {
             Uninitialized,
             Initialized,
@@ -30,13 +24,7 @@ enum ThreadState {
             Destroyed
         };
         /// <summary>Detailed outcome returned when initializing or starting a thread task.</summary>
-/**
- * ESPressio Memory Audit
- * Underlying storage: 1 bytes
- * Total Memory: 1 bytes [0 bytes dynamic allocation]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * End ESPressio Memory Audit
- */
+
 enum
 class ThreadInitializationStatus : uint8_t {
             Success,
@@ -51,14 +39,7 @@ class ThreadInitializationStatus : uint8_t {
             InitializationException
         };
         /// <summary>Base exception for ESPressio Threads lifecycle and execution failures.</summary>
-/**
- * ESPressio Memory Audit
- * Inherited Memory Total: 8 bytes [runtime_error: exception message/ref-count storage is dynamically retained by libstdc++]
- * Members: none (standalone empty object occupies 1 byte; an eligible empty base may be optimized to 0 bytes).
- * Total Memory: 8 bytes [runtime_error: exception message/ref-count storage is dynamically retained by libstdc++]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * End ESPressio Memory Audit
- */
+
 class ThreadException : public std::runtime_error {
             public:
                 explicit ThreadException(const char* message)
@@ -68,14 +49,7 @@ class ThreadException : public std::runtime_error {
                     : std::runtime_error(message) {}
         };
         /// <summary>Base exception for thread registration failures.</summary>
-/**
- * ESPressio Memory Audit
- * Inherited Memory Total: 8 bytes [ThreadException: runtime_error: exception message/ref-count storage is dynamically retained by libstdc++]
- * Members: none (standalone empty object occupies 1 byte; an eligible empty base may be optimized to 0 bytes).
- * Total Memory: 8 bytes [ThreadException: runtime_error: exception message/ref-count storage is dynamically retained by libstdc++]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * End ESPressio Memory Audit
- */
+
 class ThreadRegistrationException : public ThreadException {
             public:
                 explicit ThreadRegistrationException(const char* message)
@@ -86,15 +60,7 @@ class ThreadRegistrationException : public ThreadException {
                 ) : ThreadException(message) {}
         };
         /// <summary>Indicates that a requested thread identifier is already registered.</summary>
-/**
- * ESPressio Memory Audit
- * Inherited Memory Total: 8 bytes [ThreadRegistrationException: ThreadException: runtime_error: exception message/ref-count storage is dynamically retained by libstdc++]
- * Members:
- * - _threadID (uint8_t): 1 bytes [0 bytes dynamic allocation]
- * Total Memory: 12 bytes [ThreadRegistrationException: ThreadException: runtime_error: exception message/ref-count storage is dynamically retained by libstdc++]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * End ESPressio Memory Audit
- */
+
 class ThreadDuplicateIDException :
             public ThreadRegistrationException {
             private:
@@ -114,14 +80,7 @@ class ThreadDuplicateIDException :
         };
 
         /// <summary>Indicates an attempt to register a null thread pointer.</summary>
-/**
- * ESPressio Memory Audit
- * Inherited Memory Total: 8 bytes [ThreadRegistrationException: ThreadException: runtime_error: exception message/ref-count storage is dynamically retained by libstdc++]
- * Members: none (standalone empty object occupies 1 byte; an eligible empty base may be optimized to 0 bytes).
- * Total Memory: 8 bytes [ThreadRegistrationException: ThreadException: runtime_error: exception message/ref-count storage is dynamically retained by libstdc++]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * End ESPressio Memory Audit
- */
+
 class ThreadInvalidRegistrationException :
             public ThreadRegistrationException {
             public:
@@ -131,14 +90,7 @@ class ThreadInvalidRegistrationException :
                     ) {}
         };
         /// <summary>Indicates that the maximum number of registered thread identifiers has been exhausted.</summary>
-/**
- * ESPressio Memory Audit
- * Inherited Memory Total: 8 bytes [ThreadRegistrationException: ThreadException: runtime_error: exception message/ref-count storage is dynamically retained by libstdc++]
- * Members: none (standalone empty object occupies 1 byte; an eligible empty base may be optimized to 0 bytes).
- * Total Memory: 8 bytes [ThreadRegistrationException: ThreadException: runtime_error: exception message/ref-count storage is dynamically retained by libstdc++]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * End ESPressio Memory Audit
- */
+
 class ThreadLimitExceededException :
             public ThreadRegistrationException {
             public:
@@ -149,16 +101,7 @@ class ThreadLimitExceededException :
         };
 
         /// <summary>Wraps an exception escaping a thread's <c>OnLoop()</c> execution.</summary>
-/**
- * ESPressio Memory Audit
- * Inherited Memory Total: 8 bytes [ThreadException: runtime_error: exception message/ref-count storage is dynamically retained by libstdc++]
- * Members:
- * - _cause (std::exception_ptr): 4 bytes [referenced exception object/control storage is external]
- * Total Memory: 12 bytes [ThreadException: runtime_error: exception message/ref-count storage is dynamically retained by libstdc++; _cause: referenced exception object/control storage is external]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * Confidence: medium; compile-time sizeof on the concrete target remains authoritative for ABI-sensitive/opaque members.
- * End ESPressio Memory Audit
- */
+
 class ThreadExecutionException : public ThreadException {
             private:
                 std::exception_ptr _cause;
@@ -180,14 +123,7 @@ class ThreadExecutionException : public ThreadException {
                 }
         };
         /// <summary>Common lifecycle, configuration, and callback contract implemented by all ESPressio thread types.</summary>
-/**
- * ESPressio Memory Audit
- * Members:
- * - _automaticCleanupClaimed (std::atomic<bool>): 1 bytes [0 bytes dynamic allocation]
- * Total Memory: 8 bytes [0 bytes dynamic allocation]
- * Basis: ESP32/Xtensa ILP32 reference ABI (4-byte pointers/size_t); ESPressio stateful allocators/deleters included; ABI-sensitive STL/platform internals are identified explicitly.
- * End ESPressio Memory Audit
- */
+
 class IThread  {
             private:
                 std::atomic<bool> _automaticCleanupClaimed{false};
