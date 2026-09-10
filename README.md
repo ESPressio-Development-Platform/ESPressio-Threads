@@ -37,12 +37,7 @@ On ESP32, FreeRTOS remains the concrete execution substrate, but its task/queue/
 
 Processor-count discovery now comes through `System::Execution::Provider().ProcessorCount()`. Startup gating, task-exit synchronization, precision-scheduler wake/wait behavior, and termination-dispatch queue/execution paths consume System/Task abstractions. Public Thread configuration continues to expose ESPressio concepts such as core ID, priority, stack size, lifecycle state, and execution telemetry rather than native FreeRTOS types.
 
-The published-version sections and older examples below are retained as **release-history documentation** until the staged Threads release/documentation consolidation is completed. Where those historical sections describe direct FreeRTOS ownership or use native calls inside examples, they describe the published line rather than the architecture of this active working branch.
-
-## Current Source Version
-This source tree is version **3.1.7**.
-
-Refer to the GitHub Releases page for the latest published release/tag.
+The documentation below describes the architecture of this active working branch.
 
 Current required ESPressio dependencies:
 
@@ -55,11 +50,9 @@ The current Timing dependency carries Units downstream from `main`. Threads itse
 
 ## Compatibility
 
-ESPressio Threads `3.1.7` targets the **ESP32 family under Arduino-ESP32**. This includes classic ESP32 and current single- and multi-core variants such as ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6, ESP32-H2, and ESP32-P4 when supported by the installed Arduino-ESP32/framework version. Single-core devices use CPU 0; multiple hardware cores are not required.
+ESPressio Threads targets the **ESP32 family under Arduino-ESP32**. This includes classic ESP32 and current single- and multi-core variants such as ESP32-S2, ESP32-S3, ESP32-C3, ESP32-C6, ESP32-H2, and ESP32-P4 when supported by the installed Arduino-ESP32/framework version. Single-core devices use CPU 0; multiple hardware cores are not required.
 
-The implementation directly uses ESP-IDF FreeRTOS task, queue, and semaphore APIs through Arduino-ESP32. **ESPressio Threads does not reserve, write, inspect, or own generic FreeRTOS thread-local-storage pointer slots.** This is a critical 3.1.7 stability guarantee: ESP-IDF reserves TLS state for framework facilities such as pthread, and ESPressio must not collide with that ownership. The source architecture remains intentionally close to ESP-IDF and the repository retains its CMake/component files, but the `3.1.7` PlatformIO package does **not currently advertise pure ESP-IDF framework support** because the published ESPressio Timing/Units dependency chain does not yet advertise the same framework compatibility.
-
-> **Critical release replacement:** the originally published 3.1.7 implementation used FreeRTOS TLS index 0 for task-deletion bookkeeping and is invalidated by issue #67. The corrected 3.1.7 removes that mechanism entirely. For this critical correction only, normal semantic-versioning rules are intentionally overridden and the existing release/tag is expected to be replaced rather than advanced to a new version.
+The implementation directly uses ESP-IDF FreeRTOS task, queue, and semaphore APIs through Arduino-ESP32. **ESPressio Threads does not reserve, write, inspect, or own generic FreeRTOS thread-local-storage pointer slots.** This is a critical stability guarantee: ESP-IDF reserves TLS state for framework facilities such as pthread, and ESPressio must not collide with that ownership. The source architecture remains intentionally close to ESP-IDF and the repository retains its CMake/component files, but the PlatformIO package does **not currently advertise pure ESP-IDF framework support** because the ESPressio Timing/Units dependency chain does not yet advertise the same framework compatibility.
 
 The library is not compatible with ESP8266 or non-ESP32 families such as AVR, SAMD, RP2040, STM32, or Renesas merely because another FreeRTOS port is available there.
 
@@ -500,7 +493,7 @@ and `RegisterIterationObserver()` for iteration events.
 
 ## Observable Infrastructure Notifications
 
-Version `3.1.0` extends ESPressio Threads' existing per-Thread Observer model to the process-wide threading infrastructure.
+ESPressio Threads extends its per-Thread Observer model to the process-wide threading infrastructure.
 
 The existing:
 
@@ -622,7 +615,7 @@ precision scheduling
 
 ### Future Event Bridges
 
-The 3.1 Observer surface is intentionally synchronous and transport/event agnostic.
+The Observer surface is intentionally synchronous and transport/event agnostic.
 
 It is designed to support opt-in bridges in ESPressio Event:
 
