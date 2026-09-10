@@ -124,9 +124,9 @@ The permanent Threads lifecycle infrastructure now requires only the termination
 
 This matters especially on ESP32 configurations where Wi-Fi and ESP-NOW compete for scarce internal-capable DRAM even when external PSRAM remains plentiful.
 
-## Critical 3.1.7 release replacement
+## Critical release replacement
 
-The originally published Threads 3.1.7 implementation is invalidated because it wrote an ESPressio `Thread*` into a FreeRTOS TLS slot reserved by ESP-IDF pthread internals.
+The originally published Threads implementation is invalidated because it wrote an ESPressio `Thread*` into a FreeRTOS TLS slot reserved by ESP-IDF pthread internals.
 
 For this critical correction only, normal semantic-versioning rules were intentionally overridden. The current #72 working branch is later development work and does not imply a version or release change by itself.
 

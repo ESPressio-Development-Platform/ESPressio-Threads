@@ -37,7 +37,7 @@ On ESP32, FreeRTOS remains the concrete execution substrate, but its task/queue/
 
 Processor-count discovery now comes through `System::Execution::Provider().ProcessorCount()`. Startup gating, task-exit synchronization, precision-scheduler wake/wait behavior, and termination-dispatch queue/execution paths consume System/Task abstractions. Public Thread configuration continues to expose ESPressio concepts such as core ID, priority, stack size, lifecycle state, and execution telemetry rather than native FreeRTOS types.
 
-The published-version sections and older examples below are retained as **3.1.7 release-history documentation** until the staged Threads release/documentation consolidation is completed. Where those historical sections describe direct FreeRTOS ownership or use native calls inside examples, they describe the published 3.1.7 line rather than the architecture of this active working branch.
+The published-version sections and older examples below are retained as **release-history documentation** until the staged Threads release/documentation consolidation is completed. Where those historical sections describe direct FreeRTOS ownership or use native calls inside examples, they describe the published line rather than the architecture of this active working branch.
 
 ## Current Source Version
 This source tree is version **3.1.7**.
@@ -59,7 +59,7 @@ ESPressio Threads `3.1.7` targets the **ESP32 family under Arduino-ESP32**. This
 
 The implementation directly uses ESP-IDF FreeRTOS task, queue, and semaphore APIs through Arduino-ESP32. **ESPressio Threads does not reserve, write, inspect, or own generic FreeRTOS thread-local-storage pointer slots.** This is a critical 3.1.7 stability guarantee: ESP-IDF reserves TLS state for framework facilities such as pthread, and ESPressio must not collide with that ownership. The source architecture remains intentionally close to ESP-IDF and the repository retains its CMake/component files, but the `3.1.7` PlatformIO package does **not currently advertise pure ESP-IDF framework support** because the published ESPressio Timing/Units dependency chain does not yet advertise the same framework compatibility.
 
-> **Critical 3.1.7 release replacement:** the originally published 3.1.7 implementation used FreeRTOS TLS index 0 for task-deletion bookkeeping and is invalidated by issue #67. The corrected 3.1.7 removes that mechanism entirely. For this critical correction only, normal semantic-versioning rules are intentionally overridden and the existing 3.1.7 release/tag is expected to be replaced rather than advanced to a new version.
+> **Critical release replacement:** the originally published 3.1.7 implementation used FreeRTOS TLS index 0 for task-deletion bookkeeping and is invalidated by issue #67. The corrected 3.1.7 removes that mechanism entirely. For this critical correction only, normal semantic-versioning rules are intentionally overridden and the existing release/tag is expected to be replaced rather than advanced to a new version.
 
 The library is not compatible with ESP8266 or non-ESP32 families such as AVR, SAMD, RP2040, STM32, or Renesas merely because another FreeRTOS port is available there.
 
@@ -161,7 +161,7 @@ Given that *ESPressio* Threads uses multi-tier Namespacing throughout, let's dec
 ### A `Thread` type...
 With the required header linked, and the namespace defined, we can define a simple `Thread` type, which we shall call `MyFirstThread`:
 ```cpp
-class MyFirstThread : public Thread {
+class MyFirstThread: public Thread {
     protected:
         void OnInitialization() override {
             // Anything we need to do here prior to the Thread's Loop sstarting
@@ -178,7 +178,7 @@ We shall be building from this basic example `class` throughout the rest of this
 
 So, the above class declaration doesn't really do anything... let's build upon it to illustrate how multiple `Thread`s work:
 ```cpp
-class MyFirstThread : public Thread {
+class MyFirstThread: public Thread {
     private:
         int _counter = 0;
     protected:
@@ -233,7 +233,7 @@ To make it easier to refer up and down, let's combine all of the code together n
 
 using namespace ESPressio::Threads;
 
-class MyFirstThread : public Thread {
+class MyFirstThread: public Thread {
     private:
         int _counter = 0;
     protected:
@@ -333,7 +333,7 @@ if (status != ThreadInitializationStatus::Success) {
 `ThreadManager::Initialize()` retains its original `void` interface and ignores individual outcomes. Use `InitializeWithResults()` when the application needs to inspect every registered Thread's result:
 
 ```cpp
-for (const ThreadInitializationResult& result :
+for (const ThreadInitializationResult& result:
      ThreadManager::GetInstance()->InitializeWithResults()) {
     if (result.status != ThreadInitializationStatus::Success) {
         // Report result.threadID and result.status.
@@ -414,7 +414,7 @@ failures, and receives a final notification after the FreeRTOS task exits:
 
 using namespace ESPressio;
 
-class CountingThread final : public Threads::Thread {
+class CountingThread final: public Threads::Thread {
     private:
         uint8_t _count = 0;
 
@@ -428,7 +428,7 @@ class CountingThread final : public Threads::Thread {
         }
 };
 
-class ThreadLifecycleLogger final : public Threads::IThreadObserver {
+class ThreadLifecycleLogger final: public Threads::IThreadObserver {
     public:
         void OnThreadStateChanged(
             Threads::IThread* thread,
@@ -645,14 +645,14 @@ This keeps ESPressio Threads independent of ESPressio Event while providing rich
 ## Precision Threads
 
 `PrecisionThread<TTime>` is a high-resolution periodic Thread driven by an
-ESPressio-Timing `ISystemClock<TTime>`. Version 3.0.0 makes its public time
+ESPressio-Timing `ISystemClock<TTime>`. Version makes its public time
 representation selectable at compile time. The default is
 `Timing::DefaultClockTime`, so ordinary applications use `PrecisionThread<>`.
 
 Internally, scheduling remains based on raw `uint64_t` nanoseconds. Conversion
 to and from the public representation is performed through
 `Timing::TimeTraits<TTime>`. Pass an injected `Timing::ISystemClock<TTime>*` or
-use the default `Timing::SystemClock<TTime>::GetInstance()`. Timing 2.x typed
+use the default `Timing::SystemClock<TTime>::GetInstance()`. Timing typed
 System Clock facades share one underlying System Clock core, so different
 representations still observe the same global timeline.
 
@@ -716,7 +716,7 @@ using namespace ESPressio;
 
 constexpr uint8_t HeartbeatPin = 2;
 
-class HeartbeatThread final : public Threads::PrecisionThread<> {
+class HeartbeatThread final: public Threads::PrecisionThread<> {
     private:
         bool _ledState = false;
 
@@ -731,11 +731,11 @@ class HeartbeatThread final : public Threads::PrecisionThread<> {
             (void)skippedIterations;
 
             _ledState = !_ledState;
-            digitalWrite(HeartbeatPin, _ledState ? HIGH : LOW);
+            digitalWrite(HeartbeatPin, _ledState ? HIGH: LOW);
         }
 };
 
-class HeartbeatObserver final :
+class HeartbeatObserver final:
     public Threads::IPrecisionThreadObserver<> {
     public:
         void OnPrecisionThreadIteration(
@@ -817,7 +817,7 @@ using namespace ESPressio;
 using SerializableThreadTime =
     Units::SerializableNanoSeconds<uint64_t>;
 
-class SerializableWorker final :
+class SerializableWorker final:
     public Threads::PrecisionThread<SerializableThreadTime> {
 
 protected:
@@ -831,7 +831,7 @@ protected:
 };
 ```
 
-The Threads 3.1.7 release validates this opt-in surface against **Timing 2.2.8**, **Units 0.2.7**, and **Serializable 0.11.3**.
+The Threads release validates this opt-in surface against **Timing**, **Units**, and **Serializable**.
 
 ### Migrating from 2.x
 
@@ -843,11 +843,11 @@ Code referring to `Timing::ClockTime` should use
 `Timing::DefaultClockTime`, or the Precision Thread's `IterationTime` /
 `TimeType` aliases.
 
-The original 3.1.2 migration baseline was:
+The original migration baseline was:
 
 ```text
-ESPressio-Timing >= 2.2.2 < 3.0.0
-ESPressio-Observable >= 3.0.1 < 4.0.0
+ESPressio-Timing
+ESPressio-Observable
 ```
 
 ### The Thread Manager
@@ -905,7 +905,7 @@ It is quite common to have `Thread`s with non-permanent lifetimes, such as *Work
 
 Let's modify our previous example to take advantage of it, and let's add some *finality* to `MyFirstThread` so that it will automatically `Terminate` when it has done its "work":
 ```cpp
-class MyFirstThread : public Thread {
+class MyFirstThread: public Thread {
     private:
         int _counter = 0;
     protected:
@@ -926,7 +926,7 @@ class MyFirstThread : public Thread {
             delay(1000); // Let's let this Thread wait for 1 second before it loops around again
         }
     public:
-        MyFirstThread(bool freeOnTerminate) : Thread(freeOnTerminate) {}
+        MyFirstThread(bool freeOnTerminate): Thread(freeOnTerminate) {}
 };
 ```
 Okay, so our `MyFirstThread` class has been updated so that it will automatically `Terminate` when the `_counter` reaches `10`.
@@ -967,7 +967,7 @@ It's also good to know that the *Automatic Garbage Collector* is a "good citizen
 If a derived class has members that are used by `OnLoop()`, its destructor must call `Shutdown()` before those members are destroyed:
 
 ```cpp
-class MyWorkerThread : public Thread {
+class MyWorkerThread: public Thread {
     private:
         SomeResource _resource;
 
@@ -1046,7 +1046,7 @@ For that reason, *ESPressio Threads* provides a neat "decorator" which can be us
 
 Let's provide a simple illustrative example of an *unsafe* member in a Thread:
 ```cpp
-class NotThreadSafeThread : public Thread {
+class NotThreadSafeThread: public Thread {
     private:
         int _counter = 0;
     protected:
@@ -1067,7 +1067,7 @@ class NotThreadSafeThread : public Thread {
             delay(1000); // Let's let this Thread wait for 1 second before it loops around again
         }
     public:
-        NotThreadSafeThread(bool freeOnTerminate) : Thread(freeOnTerminate) {}
+        NotThreadSafeThread(bool freeOnTerminate): Thread(freeOnTerminate) {}
 
         int GetCounter ( return _counter; )
         
@@ -1087,7 +1087,7 @@ Well, beyond just changing the name, let's take a look:
 ```cpp
 #include <ESPressio_ThreadSafe.hpp> // < This provides access to our Thread Safe Types
 
-class ThreadSafeThread : public Thread {
+class ThreadSafeThread: public Thread {
     private:
         IThreadSafe<int>* _counter = new ReadWriteMutex<int>(0);
     protected:
@@ -1112,7 +1112,7 @@ class ThreadSafeThread : public Thread {
             delay(1000); // Let's let this Thread wait for 1 second before it loops around again
         }
     public:
-        ThreadSafeThread(bool freeOnTerminate) : Thread(freeOnTerminate) {}
+        ThreadSafeThread(bool freeOnTerminate): Thread(freeOnTerminate) {}
 
         ~ThreadSafeThread() {
             delete _counter; // We need to clean up the memory here
