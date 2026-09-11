@@ -95,7 +95,7 @@ jobs:
           INI
           cat > project/compile/src/main.cpp <<'CPP'
           #include <Arduino.h>
-          #include <WiFi.h>
+          #include <esp_wifi.h>
           #include <pthread.h>
           #include <ESPressio_ThreadWith.hpp>
           #include <ESPressio_Precision.hpp>
@@ -111,7 +111,8 @@ jobs:
                       (void)pthread_getspecific(key);
                       (void)pthread_key_delete(key);
                   }
-                  (void)::WiFi.softAPgetStationNum();
+                  wifi_sta_list_t stations{};
+                  (void)esp_wifi_ap_get_sta_list(&stations);
                   Terminate();
                   return ThreadWorkDisposition::IdleReady;
               }

@@ -53,3 +53,10 @@ failure. Ordinary admission claims use the short root control gate; state snapsh
 alone do not authorize publication across a termination race.
 
 GitHub execution results are recorded in the platform implementation checkpoint.
+
+Initial ESP32 CI run 34608309540 failed while building the Arduino WiFi wrapper:
+WiFiGeneric.h could not resolve Network.h through its framework library discovery.
+The retained coexistence probe now calls the real ESP-IDF esp_wifi_ap_get_sta_list
+API directly, preserving the driver/TLS purpose without requiring the unrelated
+Arduino networking wrapper. Native CI completed successfully; this is a compiler
+fixture failure, not an automation budget/quota classification.
