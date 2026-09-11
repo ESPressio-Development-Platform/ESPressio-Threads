@@ -1,6 +1,6 @@
 {
     "name": "ESPressio-Threads",
-    "description": "Portable long-lived thread lifecycle and precision scheduling for the ESPressio Development Platform",
+    "description": "One persistent Thread with bounded static capability composition and monotonic Precision cadence",
     "keywords": "thread,threads,threading,scheduling,precision,lifecycle,multi-core,platform-neutral,espressio",
     "homepage": "https://espressio.org",
     "authors": {
@@ -9,8 +9,12 @@
         "url": "https://espressio.org"
     },
     "build": {
-        "flags": ["-std=gnu++17"],
-        "unflags": ["-std=gnu++11"]
+        "flags": [
+            "-std=gnu++17"
+        ],
+        "unflags": [
+            "-std=gnu++11"
+        ]
     },
     "repository": {
         "type": "git",
@@ -36,10 +40,6 @@
         {
             "name": "ESPressio-Timing",
             "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Timing.git#primitives_redesign"
-        },
-        {
-            "name": "ESPressio-Observable",
-            "version": "https://github.com/ESPressio-Development-Platform/ESPressio-Observable.git#primitives_redesign"
         }
     ]
 }

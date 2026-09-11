@@ -1,724 +1,285 @@
 #pragma once
-
+#include <algorithm>
 #include <atomic>
-#include <cstdint>
-#include <functional>
 #include <memory>
 #include <mutex>
-#include <stdexcept>
-#include <string>
-
-#include <ESPressio_Memory.hpp>
 #include <ESPressio_Synchronization.hpp>
-#include <ESPressio_Task.hpp>
-
+#include <ESPressio_SystemPlatformClock.hpp>
+#include <ESPressio_TaskRuntime.hpp>
 #include "ESPressio_IThread.hpp"
-#include "ESPressio_IThreadObserver.hpp"
-#include "ESPressio_ThreadReleasePolicy.hpp"
-#include "ESPressio_ThreadSafe.hpp"
-#include "ESPressio_ThreadSafeObservable.hpp"
-
-#ifndef ESPRESSIO_THREAD_DEFAULT_STACK_SIZE
-#define ESPRESSIO_THREAD_DEFAULT_STACK_SIZE 4000
-#endif
-
-namespace ESPressio {
-namespace Threads {
-
-class ThreadTerminationDispatcher;
-
-/// <summary>Controls when a Thread becomes visible to ThreadManager.</summary>
-
-enum
-class ThreadRegistrationPolicy : uint8_t {
-    Immediate,
-    DeferredUntilInitialize
-};
-
-/// <summary>Concrete managed task implementation providing the ESPressio IThread lifecycle and observer/callback surfaces.</summary>
-/// <remarks>Thread owns an underlying platform task while initialized, serializes lifecycle transitions through ESPressio System synchronization, and defers task-exit finalization through ThreadTerminationDispatcher.</remarks>
-
+#include "ESPressio_ThreadCapability.hpp"
+namespace ESPressio::Threads {
+/// <summary>One persistent, cooperatively joined task and one common latched work signal.</summary>
+/// <remarks>The concrete owner must Shutdown before destroying members accessed by OnLoop. The host additionally
+/// joins before destroying capabilities. Providers and the clock must outlive this object; diagnostic Name must outlive the initialized task.
+/// Wake callers must retain the Thread object's lifetime; capability quiescence closes external registrations.</remarks>
 class Thread : public IThread {
-private:
-
-class LifecycleObservable final : public Observable::ThreadSafeObservable {
-    private:
-        template <typename TNotification>
-        void Notify(TNotification notification) {
-            ExecuteNotification([&](NotificationContext& context) {
-                context.WithObservers<IThreadObserver>([&](IThreadObserver* observer) {
-                    try { notification(observer); } catch (...) {}
-                });
-            });
-        }
-
-    public:
-        void NotifyStateChanged(Thread* thread, ThreadState oldState, ThreadState newState) {
-            ExecuteNotification([&](NotificationContext& notification) {
-                notification.WithObservers<IThreadObserver>([&](IThreadObserver* observer) {
-                    try { observer->OnThreadStateChanged(thread, oldState, newState); } catch (...) {}
-                    if (thread->GetThreadState() != newState) return;
-                    try {
-                        switch (newState) {
-                            case ThreadState::Uninitialized: observer->OnThreadUninitialized(thread); break;
-                            case ThreadState::Initialized: observer->OnThreadInitialized(thread); break;
-                            case ThreadState::Running: observer->OnThreadStarted(thread); break;
-                            case ThreadState::Paused: observer->OnThreadPaused(thread); break;
-                            case ThreadState::Terminating: observer->OnThreadTerminationRequested(thread); break;
-                            case ThreadState::Terminated: observer->OnThreadTerminated(thread); break;
-                            case ThreadState::Destroyed: observer->OnThreadDestroyed(thread); break;
-                        }
-                    } catch (...) {}
-                });
-            });
-        }
-
-        void NotifyTaskExited(Thread* thread) {
-            Notify([&](IThreadObserver* observer) { observer->OnThreadTaskExited(thread); });
-        }
-
-        void NotifyInitializationFailed(Thread* thread, ThreadInitializationStatus status) {
-            Notify([&](IThreadObserver* observer) {
-                observer->OnThreadInitializationFailed(thread, status);
-            });
-        }
-
-        void NotifyExecutionFailed(Thread* thread, std::exception_ptr cause) {
-            Notify([&](IThreadObserver* observer) {
-                observer->OnThreadExecutionFailed(thread, cause);
-            });
-        }
-    };
-
-
-enum
-class CleanupClaim : uint8_t {
-        Available,
-        Manual,
-        Automatic
-    };
-
-    using TOnThreadEvent = std::function<void(IThread*)>;
-    using TOnThreadStateChangeEvent = std::function<void(IThread*, ThreadState, ThreadState)>;
-    using TOnThreadInitializationFailedEvent = std::function<void(IThread*, ThreadInitializationStatus)>;
-    using TOnThreadExecutionFailedEvent = std::function<void(IThread*, std::exception_ptr)>;
-
-    template<typename TCallback>
-    using StableCallback = std::shared_ptr<const TCallback>;
-
-    template<typename TCallback>
-    static StableCallback<TCallback> MakeStableCallback(TCallback value) {
-        if (!value) return nullptr;
-        return System::Memory::MakeShared<
-            TCallback,
-            System::Memory::MemoryPolicy::ExternalPreferred
-        >(std::move(value));
+    using Mutex=System::Synchronization::Mutex;
+    mutable Mutex _control,_ownerOperation,_failureMutex;
+    std::atomic<ThreadState> _state{ThreadState::Uninitialized};
+    std::atomic<Task::TaskHandle> _handle{System::Execution::InvalidExecutionHandle};
+    std::unique_ptr<System::Synchronization::ISignal> _wake;
+    std::atomic<System::Synchronization::ISignal*> _publishedWake{nullptr};
+    System::Execution::IExecutionProvider* _provider=nullptr;
+    System::Clock::IMonotonicClock* _clock=nullptr;
+    ThreadConfiguration _configuration{};
+    ThreadFailure _failure{};
+    std::uint64_t _activation=0;
+    std::atomic<bool> _published{false},_applicationRequested{false};
+    std::atomic<std::uint64_t> _cycles{0},_iterations{0},_waits{0};
+    bool _needsTime=false;
+    void RecordFailure(ThreadFailurePhase phase,std::exception_ptr cause={}) noexcept {
+        std::lock_guard<Mutex> lock(_failureMutex);
+        if (_failure.Phase==ThreadFailurePhase::None) _failure={phase,std::move(cause),Now()};
     }
-
-    uint8_t _threadID = 0;
-    ThreadRegistrationPolicy _registrationPolicy = ThreadRegistrationPolicy::Immediate;
-    std::atomic<bool> _registered{false};
-
-    std::atomic<ThreadState> _threadState{ThreadState::Uninitialized};
-    std::atomic<bool> _freeOnTerminate{false};
-    std::atomic<bool> _startOnInitialize{true};
-
-    std::atomic<Task::TaskHandle> _taskHandle{System::Execution::InvalidExecutionHandle};
-    std::atomic<Task::TaskHandle> _initializingTaskHandle{System::Execution::InvalidExecutionHandle};
-    std::atomic<bool> _initializationInProgress{false};
-    std::atomic<bool> _terminationDispatchPending{false};
-    std::atomic<bool> _taskExitFinalizationStarted{false};
-    std::atomic<CleanupClaim> _cleanupClaim{CleanupClaim::Available};
-
-    std::unique_ptr<System::Synchronization::ISignal> _taskExited;
-    std::unique_ptr<System::Synchronization::ISignal> _taskStartGate;
-
-    mutable System::Synchronization::Mutex _taskConfigurationMutex;
-    mutable System::Synchronization::RecursiveMutex _stateTransitionMutex;
-
-    std::atomic<uint32_t> _stackSize{ESPRESSIO_THREAD_DEFAULT_STACK_SIZE};
-    std::atomic<unsigned int> _priority{2};
-    std::atomic<int> _coreID{0};
-
-    std::shared_ptr<LifecycleObservable> _lifecycleObservable;
-
-    mutable System::Synchronization::Mutex _callbackMutex;
-    StableCallback<TOnThreadEvent> _onDestroy;
-    StableCallback<TOnThreadEvent> _onInitialize;
-    StableCallback<TOnThreadEvent> _onStart;
-    StableCallback<TOnThreadEvent> _onPause;
-    StableCallback<TOnThreadEvent> _onTerminate;
-    StableCallback<TOnThreadEvent> _onTerminated;
-    StableCallback<TOnThreadInitializationFailedEvent> _onInitializationFailed;
-    StableCallback<TOnThreadExecutionFailedEvent> _onExecutionFailed;
-    StableCallback<TOnThreadStateChangeEvent> _onStateChange;
-
-    bool _ensureRegistered();
-    void _removeRegistration() noexcept;
-
-    bool _isValidThreadStateTransition(ThreadState oldState, ThreadState newState) const noexcept {
-        if (oldState == newState) return false;
-        if (newState == ThreadState::Destroyed) return oldState != ThreadState::Destroyed;
-
-        switch (oldState) {
-            case ThreadState::Uninitialized:
-                return newState == ThreadState::Initialized || newState == ThreadState::Terminating;
-            case ThreadState::Initialized:
-                return newState == ThreadState::Running || newState == ThreadState::Terminating;
-            case ThreadState::Running:
-                return newState == ThreadState::Paused || newState == ThreadState::Terminating;
-            case ThreadState::Paused:
-                return newState == ThreadState::Running || newState == ThreadState::Terminating;
-            case ThreadState::Terminating:
-                return newState == ThreadState::Terminated;
-            case ThreadState::Terminated:
-                return newState == ThreadState::Uninitialized;
-            case ThreadState::Destroyed:
-                return false;
-        }
-        return false;
+    ThreadCycleContext Context() noexcept { return {_needsTime ? Now() : 0,HostServices()}; }
+    static void Entry(void* value) noexcept { static_cast<Thread*>(value)->Run(); }
+    bool ClaimQuantum(std::uint64_t epoch) {
+        // This claim linearizes the start of a bounded quantum against Pause/Terminate.
+        // A claimed quantum is in flight and may finish; subsequent claims fail.
+        std::lock_guard<Mutex> lock(_control);
+        return _state.load(std::memory_order_relaxed)==ThreadState::Running && epoch==_activation;
     }
-
-    void _deleteTask() {
-        const auto handle = _taskHandle.exchange(
-            System::Execution::InvalidExecutionHandle,
-            std::memory_order_acq_rel
-        );
-        if (handle != System::Execution::InvalidExecutionHandle) {
-            Task::TaskRuntime::Delete(handle);
+    void Wait(ThreadDeadline deadline) noexcept {
+        std::uint32_t milliseconds=System::Synchronization::WaitForever;
+        if (deadline.Present) {
+            const auto now=Now();
+            if (deadline.Due(now)) return;
+            const auto remaining=deadline.MonotonicNanoseconds-now;
+            const auto rounded=remaining/1000000+(remaining%1000000!=0);
+            milliseconds=static_cast<std::uint32_t>(std::min<std::uint64_t>(rounded,UINT32_MAX-1));
+        }
+        ++_waits;
+        const auto result=_wake->Wait(milliseconds);
+        if (!result && result.Status!=System::PlatformStatus::Timeout) {
+            RecordFailure(ThreadFailurePhase::Provider); Terminate();
         }
     }
-
-    static void _requestGarbageCollection();
-    static bool _isTerminationDispatcherAvailable();
-    static bool _isCurrentTerminationDispatcherTask();
-    static bool _queueTerminationDispatch(Thread* thread);
-    void _dispatchTermination();
-
-    bool _beginTaskExitFinalization() noexcept {
-        bool expected = false;
-        return _taskExitFinalizationStarted.compare_exchange_strong(
-            expected,
-            true,
-            std::memory_order_acq_rel,
-            std::memory_order_acquire
-        );
-    }
-
-    bool _queueTaskExitFinalization() noexcept {
-        _terminationDispatchPending.store(true, std::memory_order_release);
-        if (_queueTerminationDispatch(this)) return true;
-        _terminationDispatchPending.store(false, std::memory_order_release);
-        return false;
-    }
-
-    void _finalizeStoppedTaskExit() noexcept {
-        if (_beginTaskExitFinalization()) _queueTaskExitFinalization();
-    }
-
-    [[noreturn]] void _finalizeCurrentTaskExit() noexcept {
-        if (_beginTaskExitFinalization()) {
-            try { TrySetThreadState(ThreadState::Terminating, ThreadState::Terminated); } catch (...) {}
-            _queueTaskExitFinalization();
-        }
-
-        Task::TaskRuntime::Suspend(System::Execution::InvalidExecutionHandle);
-        for (;;) {
-            Task::TaskRuntime::SleepMilliseconds(1000);
-        }
-    }
-
-    void _dispatchExecutionFailed(std::exception_ptr cause) noexcept {
-        const std::exception_ptr executionFailure =
-            std::make_exception_ptr(ThreadExecutionException(std::move(cause)));
-
+    void Run() noexcept {
+        ThreadFailurePhase phase=ThreadFailurePhase::Lifecycle;
+        bool activated=false;
+        std::uint64_t epoch=0;
         try {
-            StableCallback<TOnThreadExecutionFailedEvent> callback;
-            {
-                std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex);
-                callback = _onExecutionFailed;
+            while (!_published.load(std::memory_order_acquire)) Wait({});
+            for (;;) {
+                auto state=_state.load(std::memory_order_acquire);
+                if (state==ThreadState::Terminating || state==ThreadState::Terminated) break;
+                auto context=Context();
+                if (state!=ThreadState::Running) {
+                    if (activated) {
+                        phase=ThreadFailurePhase::Lifecycle;
+                        (void)Host(ThreadHostOperation::Pause,context); activated=false;
+                    }
+                    // Never reset the latch between checking state/readiness and waiting.
+                    Wait({}); continue;
+                }
+                std::uint64_t requestedEpoch;
+                { std::lock_guard<Mutex> lock(_control); requestedEpoch=_activation; }
+                if (!activated || epoch!=requestedEpoch) {
+                    phase=ThreadFailurePhase::Lifecycle;
+                    (void)Host(ThreadHostOperation::Activate,context);
+                    activated=true; epoch=requestedEpoch; _applicationRequested.store(true,std::memory_order_release);
+                    if (!ClaimQuantum(epoch)) continue;
+                }
+                ++_cycles;
+                phase=ThreadFailurePhase::Capability;
+                auto result=Host(ThreadHostOperation::Inspect,context);
+                if (!result.Ready.ApplicationDeadlineDue && result.Ready.Immediate && ClaimQuantum(epoch)) {
+                    context=Context();
+                    result=Host(ThreadHostOperation::Inspect,context);
+                    if (!result.Ready.ApplicationDeadlineDue) (void)Host(ThreadHostOperation::Service,context);
+                    context=Context(); // One positive quantum may have crossed a temporal deadline.
+                    result=Host(ThreadHostOperation::Inspect,context);
+                }
+                if (result.Ready.ApplicationEligible &&
+                    (result.Ready.ApplicationDeadlineDue || _applicationRequested.load(std::memory_order_acquire)) && ClaimQuantum(epoch)) {
+                    _applicationRequested.store(false,std::memory_order_release);
+                    phase=ThreadFailurePhase::Capability;
+                    if (!Host(ThreadHostOperation::BeforeApplication,context).Ready.ApplicationEligible) {
+                        _applicationRequested.store(true,std::memory_order_release); continue;
+                    }
+                    phase=ThreadFailurePhase::Application;
+                    const auto disposition=OnLoop(); ++_iterations;
+                    if (disposition==ThreadWorkDisposition::ImmediateWorkRemaining)
+                        _applicationRequested.store(true,std::memory_order_release);
+                    phase=ThreadFailurePhase::Capability;
+                    context=Context(); (void)Host(ThreadHostOperation::AfterApplication,context);
+                }
+                if (_state.load(std::memory_order_acquire)!=ThreadState::Running) continue;
+                context=Context(); result=Host(ThreadHostOperation::Inspect,context);
+                if (result.Ready.Immediate || result.Ready.Deadline.Due(context.Now) ||
+                    (result.Ready.ApplicationEligible && _applicationRequested.load(std::memory_order_acquire))) continue;
+                Wait(result.Ready.Deadline);
             }
-            if (callback != nullptr) (*callback)(this, executionFailure);
-        } catch (...) {}
-
-        try { _lifecycleObservable->NotifyExecutionFailed(this, executionFailure); } catch (...) {}
+        } catch (...) { RecordFailure(phase,std::current_exception()); Terminate(); }
+        auto context=Context();
+        try { (void)Host(ThreadHostOperation::Quiesce,context); }
+        catch (...) { RecordFailure(ThreadFailurePhase::Teardown,std::current_exception()); }
+        try { OnTermination(); }
+        catch (...) { RecordFailure(ThreadFailurePhase::Teardown,std::current_exception()); }
+        _state.store(ThreadState::Terminated,std::memory_order_release);
+        // Return normally. System provider trampoline owns native exit and Join completion.
     }
-
-    void _waitForTerminationDispatch() {
-        if (!_terminationDispatchPending.load(std::memory_order_acquire)) return;
-        if (_isCurrentTerminationDispatcherTask()) return;
-
-        while (_terminationDispatchPending.load(std::memory_order_acquire)) {
-            Task::TaskRuntime::SleepMilliseconds(1);
-        }
-    }
-
-    void _loop() {
-        for (;;) {
-            switch (_threadState.load(std::memory_order_acquire)) {
-                case ThreadState::Paused:
-                case ThreadState::Initialized:
-                case ThreadState::Uninitialized:
-                    Task::TaskRuntime::SleepMilliseconds(1);
-                    break;
-                case ThreadState::Running:
-                    OnLoop();
-                    break;
-                case ThreadState::Terminating:
-                case ThreadState::Terminated:
-                case ThreadState::Destroyed:
-                    return;
-            }
-        }
-    }
-
-    void _dispatchThreadStateChange(ThreadState oldState, ThreadState newState) {
-        StableCallback<TOnThreadStateChangeEvent> onStateChange;
-        StableCallback<TOnThreadEvent> onThreadEvent;
-        bool callbackFailed = false;
-        {
-            std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex);
-            onStateChange = _onStateChange;
-            switch (newState) {
-                case ThreadState::Terminated: onThreadEvent = _onTerminate; break;
-                case ThreadState::Paused: onThreadEvent = _onPause; break;
-                case ThreadState::Running: onThreadEvent = _onStart; break;
-                case ThreadState::Initialized: onThreadEvent = _onInitialize; break;
-                default: break;
-            }
-        }
-
-        if (onStateChange != nullptr) {
-            try { (*onStateChange)(this, oldState, newState); } catch (...) { callbackFailed = true; }
-        }
-
-        if (onThreadEvent != nullptr && GetThreadState() == newState) {
-            try { (*onThreadEvent)(this); } catch (...) { callbackFailed = true; }
-        }
-
-        try { _lifecycleObservable->NotifyStateChanged(this, oldState, newState); }
-        catch (...) { callbackFailed = true; }
-
-        if (
-            callbackFailed &&
-            _initializationInProgress.load(std::memory_order_acquire) &&
-            _initializingTaskHandle.load(std::memory_order_acquire) == Task::TaskRuntime::Current()
-        ) {
-            throw std::runtime_error("Thread initialization lifecycle callback failed");
-        }
-    }
-
 protected:
-    /// <summary>Performs one iteration of user thread work while the Thread is in the Running state.</summary>
-    virtual void OnLoop() {
-        Task::TaskRuntime::SleepMilliseconds(1);
-    }
-
-    /// <summary>Hook invoked during task initialization before the Thread enters Initialized state.</summary>
+    virtual ThreadWorkDisposition OnLoop() { return ThreadWorkDisposition::IdleReady; }
     virtual void OnInitialization() {}
-
-    /// <summary>Transitions the Thread to a valid new lifecycle state and dispatches associated callbacks/observer notifications.</summary>
-    void SetThreadState(ThreadState state) {
-        std::lock_guard<System::Synchronization::RecursiveMutex> transitionLock(_stateTransitionMutex);
-        const ThreadState oldState = _threadState.load(std::memory_order_acquire);
-        if (!_isValidThreadStateTransition(oldState, state)) return;
-        _threadState.store(state, std::memory_order_release);
-        _dispatchThreadStateChange(oldState, state);
+    virtual void OnInitializationRollback() noexcept {}
+    virtual void OnTermination() {}
+    /// <summary>The sole neutral host override. Bare Thread never enumerates or knows domain capabilities.</summary>
+    virtual ThreadHostResult Host(ThreadHostOperation,ThreadCycleContext&) { return {}; }
+    ThreadHostServices HostServices() noexcept {
+        return {this,[](void* p,bool interrupt) noexcept { return interrupt ? static_cast<Thread*>(p)->WakeFromInterrupt() : static_cast<Thread*>(p)->Wake(); },
+            [](const void* p) noexcept { const auto s=static_cast<const Thread*>(p)->GetThreadState();
+                return s==ThreadState::Initialized || s==ThreadState::Running || s==ThreadState::Paused; },
+            [](const void* p) noexcept { return static_cast<const Thread*>(p)->Now(); },
+            [](void* p) noexcept {
+                auto& thread=*static_cast<Thread*>(p);
+                if (!thread._control.try_lock()) return false;
+                const auto state=thread.GetThreadState();
+                if (state==ThreadState::Initialized || state==ThreadState::Running || state==ThreadState::Paused) return true;
+                thread._control.unlock(); return false;
+            },
+            [](void* p) noexcept { static_cast<Thread*>(p)->_control.unlock(); }};
     }
-
-    /// <summary>Atomically performs a lifecycle transition only when the current state matches the expected state.</summary>
-    bool TrySetThreadState(ThreadState expectedState, ThreadState newState) {
-        std::lock_guard<System::Synchronization::RecursiveMutex> transitionLock(_stateTransitionMutex);
-        const ThreadState currentState = _threadState.load(std::memory_order_acquire);
-        if (
-            currentState != expectedState ||
-            !_isValidThreadStateTransition(currentState, newState)
-        ) return false;
-        _threadState.store(newState, std::memory_order_release);
-        _dispatchThreadStateChange(expectedState, newState);
-        return true;
-    }
-
 public:
-    friend class ThreadTerminationDispatcher;
-
-    Thread();
-    explicit Thread(ThreadRegistrationPolicy registrationPolicy);
-
-    explicit Thread(ThreadReleasePolicy releasePolicy) : Thread() {
-        SetFreeOnTerminate(releasePolicy == ThreadReleasePolicy::ReleaseOnTerminate);
+    static constexpr std::uint32_t RootFrameworkStackFloorBytes=1024;
+    explicit Thread(const ThreadConfiguration& configuration={},System::Clock::IMonotonicClock* clock=nullptr)
+        :_clock(clock),_configuration(configuration) {}
+    Thread(const Thread&)=delete; Thread& operator=(const Thread&)=delete;
+    ~Thread() override { if (Shutdown()!=ThreadStatus::Success) std::terminate(); }
+    /// <summary>Monotonic scheduling only; the provider is frozen at initialization.</summary>
+    std::uint64_t Now() const noexcept { return (_clock ? *_clock : System::Clock::Monotonic()).NowNanoseconds(); }
+    ThreadState GetThreadState() const noexcept override { return _state.load(std::memory_order_acquire); }
+    bool Wake() noexcept {
+        auto* signal=_publishedWake.load(std::memory_order_acquire);
+        return signal && static_cast<bool>(signal->Give());
     }
-
-    Thread(
-        ThreadReleasePolicy releasePolicy,
-        ThreadRegistrationPolicy registrationPolicy
-    ) : Thread(registrationPolicy) {
-        SetFreeOnTerminate(releasePolicy == ThreadReleasePolicy::ReleaseOnTerminate);
+    bool WakeFromInterrupt() noexcept {
+        auto* signal=_publishedWake.load(std::memory_order_acquire);
+        return signal && static_cast<bool>(signal->GiveFromInterrupt());
     }
-
-    virtual ~Thread();
-
-    void GarbageCollect();
-
-    Observable::ObserverHandlePtr RegisterThreadObserver(IThreadObserver* observer) {
-        return _lifecycleObservable->RegisterObserverAs<IThreadObserver>(observer);
+    /// <summary>Publishes ordinary application demand separately from capability work, then uses the common Wake.</summary>
+    void RequestLoop() noexcept { _applicationRequested.store(true,std::memory_order_release); (void)Wake(); }
+    ThreadStatus Configure(const ThreadConfiguration& configuration) {
+        std::unique_lock<Mutex> owner(_ownerOperation,std::try_to_lock);
+        if (!owner.owns_lock()) return ThreadStatus::Busy;
+        if (_handle.load()!=System::Execution::InvalidExecutionHandle || GetThreadState()!=ThreadState::Uninitialized)
+            return ThreadStatus::InvalidState;
+        std::lock_guard<Mutex> lock(_control); _configuration=configuration; return ThreadStatus::Success;
     }
-
-    void UnregisterThreadObserver(IThreadObserver* observer) {
-        _lifecycleObservable->UnregisterObserver(observer);
+    ThreadResourceProfile GetResourceProfile() {
+        std::lock_guard<Mutex> lock(_control);
+        ThreadCycleContext context{0,HostServices()};
+        auto result=Host(ThreadHostOperation::Resources,context).Resources;
+        if (!result.ResidentBytes) { result.ResidentBytes=sizeof(Thread); result.ResidentAlignment=alignof(Thread); }
+        result.FrameworkStackFloorBytes=std::max(result.FrameworkStackFloorBytes,RootFrameworkStackFloorBytes);
+        result.FrameworkStackFloorBytes=std::max(result.FrameworkStackFloorBytes,_configuration.ApplicationStackFloorBytes);
+        result.ConfiguredStackBytes=_configuration.Execution.StackSize;
+        return result;
     }
-
-    void Shutdown() {
-        CleanupClaim expectedClaim = CleanupClaim::Available;
-        _cleanupClaim.compare_exchange_strong(
-            expectedClaim,
-            CleanupClaim::Manual,
-            std::memory_order_acq_rel,
-            std::memory_order_acquire
-        );
-
-        SetFreeOnTerminate(false);
-
-        const auto handle = _taskHandle.load(std::memory_order_acquire);
-        const auto currentTask = Task::TaskRuntime::Current();
-
-        if (
-            _initializationInProgress.load(std::memory_order_acquire) &&
-            _initializingTaskHandle.load(std::memory_order_acquire) == currentTask
-        ) {
-            Terminate();
-            return;
-        }
-
-        if (handle == System::Execution::InvalidExecutionHandle) {
-            if (
-                GetThreadState() != ThreadState::Terminated &&
-                GetThreadState() != ThreadState::Destroyed
-            ) {
-                Terminate();
-                SetThreadState(ThreadState::Terminated);
-            }
-            _waitForTerminationDispatch();
-            return;
-        }
-
-        if (handle == currentTask) {
-            Terminate();
-            return;
-        }
-
-        Terminate();
-        if (_taskExited != nullptr) (void)_taskExited->Wait();
-        _waitForTerminationDispatch();
-    }
-
-private:
-    static void _taskEntry(void* parameter) {
-        Thread* instance = static_cast<Thread*>(parameter);
-
-        if (instance != nullptr) {
-            if (instance->_taskStartGate == nullptr || !instance->_taskStartGate->Wait()) {
-                instance->_finalizeCurrentTaskExit();
-            }
-            try {
-                instance->_loop();
-            } catch (...) {
-                instance->_dispatchExecutionFailed(std::current_exception());
-                instance->Terminate();
-            }
-            instance->_finalizeCurrentTaskExit();
-        }
-
-        Task::TaskRuntime::Delete(System::Execution::InvalidExecutionHandle);
-    }
-
-    ThreadInitializationStatus _initialize() {
-        if (!_ensureRegistered()) {
-            return ThreadInitializationStatus::InvalidState;
-        }
-        if (_taskExited == nullptr || _taskStartGate == nullptr) {
-            return ThreadInitializationStatus::ExitSignalUnavailable;
-        }
-        if (
-            _taskHandle.load(std::memory_order_acquire) !=
-            System::Execution::InvalidExecutionHandle
-        ) {
-            return ThreadInitializationStatus::AlreadyInitialized;
-        }
-        if (_terminationDispatchPending.load(std::memory_order_acquire)) {
-            return ThreadInitializationStatus::TerminationDispatchPending;
-        }
-        if (!_isTerminationDispatcherAvailable()) {
-            return ThreadInitializationStatus::TerminationDispatcherUnavailable;
-        }
-
-        const ThreadState initialState = GetThreadState();
-        if (initialState == ThreadState::Terminated) {
-            if (!TrySetThreadState(ThreadState::Terminated, ThreadState::Uninitialized)) {
-                return ThreadInitializationStatus::InvalidState;
-            }
-        } else if (initialState != ThreadState::Uninitialized) {
-            return ThreadInitializationStatus::InvalidState;
-        }
-
-        std::unique_lock<System::Synchronization::Mutex> configurationLock(_taskConfigurationMutex);
-        if (
-            _taskHandle.load(std::memory_order_acquire) !=
-            System::Execution::InvalidExecutionHandle
-        ) {
-            return ThreadInitializationStatus::AlreadyInitialized;
-        }
-
-        const std::string threadName = "thread" + std::to_string(GetThreadID());
-
-        (void)_taskExited->Reset();
-        (void)_taskStartGate->Reset();
-        _taskExitFinalizationStarted.store(false, std::memory_order_release);
-
-        Task::TaskConfiguration configuration;
-        configuration.Name = threadName.c_str();
-        configuration.StackSize = GetStackSize();
-        configuration.Priority = GetPriority();
-        configuration.Core = GetCoreID();
-
-        const auto creation = Task::TaskRuntime::Create(_taskEntry, this, configuration);
-        if (!creation) return ThreadInitializationStatus::TaskCreationFailed;
-
-        const auto createdTask = creation.Handle;
-        auto expected = System::Execution::InvalidExecutionHandle;
-        if (!_taskHandle.compare_exchange_strong(
-                expected,
-                createdTask,
-                std::memory_order_release,
-                std::memory_order_acquire
-            )) {
-            Task::TaskRuntime::Delete(createdTask);
-            return ThreadInitializationStatus::ConcurrentInitializationLost;
-        }
-
-        configurationLock.unlock();
-
-
-struct InitializationContextGuard {
-            std::atomic<Task::TaskHandle>& taskHandle;
-            std::atomic<bool>& inProgress;
-
-            ~InitializationContextGuard() {
-                inProgress.store(false, std::memory_order_release);
-                taskHandle.store(
-                    System::Execution::InvalidExecutionHandle,
-                    std::memory_order_release
-                );
-            }
-        };
-
-        _initializingTaskHandle.store(Task::TaskRuntime::Current(), std::memory_order_release);
-        _initializationInProgress.store(true, std::memory_order_release);
-        InitializationContextGuard initializationContext{
-            _initializingTaskHandle,
-            _initializationInProgress
-        };
-
+    ThreadStatus Initialize() override {
+        std::unique_lock<Mutex> owner(_ownerOperation,std::try_to_lock);
+        if (!owner.owns_lock()) return ThreadStatus::Busy;
+        if (_handle.load()!=System::Execution::InvalidExecutionHandle) return ThreadStatus::AlreadyInitialized;
+        if (GetThreadState()!=ThreadState::Uninitialized) return ThreadStatus::InvalidState;
+        { std::lock_guard<Mutex> lock(_control); _state.store(ThreadState::Initializing); }
+        { std::lock_guard<Mutex> lock(_failureMutex); _failure={}; }
+        if (!_clock) _clock=&System::Clock::Monotonic();
+        _provider=&System::Execution::Provider();
+        ThreadCycleContext context{Now(),HostServices()};
+        bool applicationEntered=false,hostEntered=false;
+        ThreadStatus status=ThreadStatus::Success;
+        const bool hadWake=bool(_wake);
         try {
-            OnInitialization();
-
-            const ThreadState stateAfterInitialization = GetThreadState();
-            if (
-                stateAfterInitialization == ThreadState::Terminating ||
-                stateAfterInitialization == ThreadState::Terminated
-            ) {
-                if (stateAfterInitialization == ThreadState::Terminating) {
-                    SetThreadState(ThreadState::Terminated);
+            const auto resources=GetResourceProfile();
+            if (!_configuration.Execution.StackSize) status=ThreadStatus::InvalidConfiguration;
+            else if (_configuration.Execution.StackSize<resources.FrameworkStackFloorBytes) status=ThreadStatus::StackTooSmall;
+            if (status==ThreadStatus::Success && !_wake) {
+                auto* signals=System::Synchronization::Provider();
+                if (signals) _wake=signals->CreateBinarySignal();
+                if (!_wake) status=ThreadStatus::SignalUnavailable;
+            }
+            if (status==ThreadStatus::Success) {
+                applicationEntered=true; OnInitialization();
+                hostEntered=true; status=Host(ThreadHostOperation::Initialize,context).Status;
+            }
+            if (status==ThreadStatus::Success) status=Host(ThreadHostOperation::FinalizeInitialization,context).Status;
+            if (status==ThreadStatus::Success && GetThreadState()!=ThreadState::Initializing) status=ThreadStatus::InvalidState;
+            if (status==ThreadStatus::Success) {
+                _needsTime=Host(ThreadHostOperation::Resources,context).NeedsMonotonicTime;
+                _published.store(false,std::memory_order_release);
+                std::lock_guard<Mutex> publication(_control);
+                if (GetThreadState()!=ThreadState::Initializing) throw ThreadStatus::InvalidState;
+                const auto created=Task::TaskRuntime::CreateJoinable(&Entry,this,_configuration.Execution,*_provider);
+                if (!created) {
+                    status=created.Status==Task::TaskExecutionStatus::UnsupportedExecutionProvider ? ThreadStatus::UnsupportedProvider :
+                        created.Status==Task::TaskExecutionStatus::InvalidConfiguration || created.Status==Task::TaskExecutionStatus::UnsupportedMemoryPolicy ?
+                        ThreadStatus::InvalidConfiguration : ThreadStatus::TaskCreationFailed;
+                } else {
+                    _handle.store(created.Handle,std::memory_order_release);
+                    _publishedWake.store(_wake.get(),std::memory_order_release);
+                    _state.store(ThreadState::Initialized,std::memory_order_release);
+                    _published.store(true,std::memory_order_release); (void)Wake();
+                    return ThreadStatus::Success;
                 }
-                _deleteTask();
-                _finalizeStoppedTaskExit();
-                return ThreadInitializationStatus::TerminatedDuringInitialization;
             }
-
-            SetThreadState(ThreadState::Initialized);
-
-            const ThreadState stateAfterInitialized = GetThreadState();
-            if (
-                stateAfterInitialized == ThreadState::Terminating ||
-                stateAfterInitialized == ThreadState::Terminated
-            ) {
-                if (stateAfterInitialized == ThreadState::Terminating) {
-                    SetThreadState(ThreadState::Terminated);
-                }
-                _deleteTask();
-                _finalizeStoppedTaskExit();
-                return ThreadInitializationStatus::TerminatedDuringInitialization;
-            }
-
-            if (
-                stateAfterInitialized == ThreadState::Initialized &&
-                GetStartOnInitialize()
-            ) {
-                SetThreadState(ThreadState::Running);
-            }
-        } catch (...) {
-            try { Terminate(); } catch (...) {}
-            try { SetThreadState(ThreadState::Terminated); } catch (...) {}
-            _deleteTask();
-            _finalizeStoppedTaskExit();
-            return ThreadInitializationStatus::InitializationException;
-        }
-
-        if (!_taskStartGate->Give()) {
-            _deleteTask();
-            _finalizeStoppedTaskExit();
-            return ThreadInitializationStatus::TaskCreationFailed;
-        }
-        return ThreadInitializationStatus::Success;
-    }
-
-public:
-    ThreadInitializationStatus Initialize() override {
-        const ThreadInitializationStatus status = _initialize();
-        if (status != ThreadInitializationStatus::Success) {
-            StableCallback<TOnThreadInitializationFailedEvent> callback;
-            {
-                std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex);
-                callback = _onInitializationFailed;
-            }
-            if (callback != nullptr) {
-                try { (*callback)(this, status); } catch (...) {}
-            }
-            try { _lifecycleObservable->NotifyInitializationFailed(this, status); } catch (...) {}
-        }
+        } catch (...) { RecordFailure(ThreadFailurePhase::Initialization,std::current_exception()); status=ThreadStatus::InitializationFailed; }
+        if (hostEntered) { try { (void)Host(ThreadHostOperation::RollbackInitialization,context); }
+            catch (...) { RecordFailure(ThreadFailurePhase::Teardown,std::current_exception()); } }
+        if (applicationEntered) OnInitializationRollback();
+        if (!hadWake) _wake.reset();
+        _state.store(ThreadState::Uninitialized,std::memory_order_release);
         return status;
     }
-
-    void Terminate() override {
-        switch (GetThreadState()) {
-            case ThreadState::Uninitialized:
-                SetThreadState(ThreadState::Terminating);
-                SetThreadState(ThreadState::Terminated);
-                return;
-            case ThreadState::Initialized:
-            case ThreadState::Running:
-            case ThreadState::Paused:
-                SetThreadState(ThreadState::Terminating);
-                return;
-            default:
-                return;
+    /// <summary>Activates only an already-initialized frozen topology; first Start/each Resume starts a fresh epoch.</summary>
+    ThreadStatus Start() override {
+        std::lock_guard<Mutex> lock(_control);
+        const auto state=GetThreadState();
+        if (state!=ThreadState::Initialized && state!=ThreadState::Paused) return ThreadStatus::InvalidState;
+        if (_activation==UINT64_MAX) return ThreadStatus::GenerationExhausted;
+        ++_activation; _state.store(ThreadState::Running,std::memory_order_release); (void)Wake(); return ThreadStatus::Success;
+    }
+    ThreadStatus Pause() override {
+        std::lock_guard<Mutex> lock(_control);
+        if (GetThreadState()!=ThreadState::Running) return ThreadStatus::InvalidState;
+        _state.store(ThreadState::Paused,std::memory_order_release); (void)Wake(); return ThreadStatus::Success;
+    }
+    /// <summary>Closes new quantum claims immediately; current bounded work completes and quiescence invokes no application drain.</summary>
+    void Terminate() noexcept override {
+        std::lock_guard<Mutex> lock(_control);
+        const auto state=GetThreadState();
+        if (state==ThreadState::Uninitialized || state==ThreadState::Terminated) return;
+        _state.store(ThreadState::Terminating,std::memory_order_release); (void)Wake();
+    }
+    /// <summary>External owner joins native exit. A worker call requests termination and reports SelfJoin.</summary>
+    ThreadStatus Shutdown() noexcept override {
+        auto handle=_handle.load(std::memory_order_acquire);
+        if (handle!=System::Execution::InvalidExecutionHandle && _provider && _provider->Current()==handle) {
+            Terminate(); return ThreadStatus::SelfJoin;
         }
-    }
-
-    ThreadInitializationStatus Start() override {
-        switch (GetThreadState()) {
-            case ThreadState::Uninitialized:
-            case ThreadState::Terminated: {
-                const auto status = Initialize();
-                if (status != ThreadInitializationStatus::Success) return status;
-                TrySetThreadState(ThreadState::Initialized, ThreadState::Running);
-                return status;
-            }
-            case ThreadState::Initialized:
-                TrySetThreadState(ThreadState::Initialized, ThreadState::Running);
-                return ThreadInitializationStatus::AlreadyInitialized;
-            case ThreadState::Paused:
-                TrySetThreadState(ThreadState::Paused, ThreadState::Running);
-                return ThreadInitializationStatus::AlreadyInitialized;
-            case ThreadState::Running:
-                return ThreadInitializationStatus::AlreadyInitialized;
-            case ThreadState::Terminating:
-            case ThreadState::Destroyed:
-                return ThreadInitializationStatus::InvalidState;
+        std::unique_lock<Mutex> owner(_ownerOperation,std::try_to_lock);
+        if (!owner.owns_lock()) return ThreadStatus::Busy;
+        handle=_handle.load(std::memory_order_acquire);
+        if (handle!=System::Execution::InvalidExecutionHandle) {
+            Terminate();
+            try { if (!_provider->Join(handle)) return ThreadStatus::JoinFailed; }
+            catch (...) { RecordFailure(ThreadFailurePhase::Provider,std::current_exception()); return ThreadStatus::JoinFailed; }
+            _handle.store(System::Execution::InvalidExecutionHandle,std::memory_order_release);
         }
-        return ThreadInitializationStatus::InvalidState;
+        _state.store(ThreadState::Uninitialized,std::memory_order_release);
+        // Keep the one lifetime-owned wake allocated after success: concurrent stale Wake is harmless,
+        // and no signal pointer is reclaimed until owner-controlled object destruction.
+        return ThreadStatus::Success;
     }
-
-    void Pause() override {
-        TrySetThreadState(ThreadState::Running, ThreadState::Paused);
+    ThreadDiagnostics GetDiagnostics() const override {
+        ThreadDiagnostics result;
+        result.State=GetThreadState(); result.ServiceCycles=_cycles.load(); result.ApplicationIterations=_iterations.load(); result.Waits=_waits.load();
+        { std::lock_guard<Mutex> lock(_failureMutex); result.Failure=_failure; }
+        std::unique_lock<Mutex> owner(_ownerOperation,std::try_to_lock);
+        if (owner.owns_lock()) { const auto handle=_handle.load(); if (handle && _provider) {
+            result.MinimumFreeStackBytes=_provider->MinimumFreeStackBytes(handle); result.StackTelemetryAvailable=true;
+        } }
+        return result;
     }
-
-    bool TryClaimAutomaticCleanup() override {
-        if (!GetFreeOnTerminate() || GetThreadState() != ThreadState::Terminated) return false;
-        CleanupClaim expected = CleanupClaim::Available;
-        return _cleanupClaim.compare_exchange_strong(
-            expected,
-            CleanupClaim::Automatic,
-            std::memory_order_acq_rel,
-            std::memory_order_acquire
-        );
-    }
-
-    int GetCoreID() override { return _coreID.load(std::memory_order_acquire); }
-    uint32_t GetStackSize() override { return _stackSize.load(std::memory_order_acquire); }
-    unsigned int GetPriority() override { return _priority.load(std::memory_order_acquire); }
-    uint8_t GetThreadID() override { return _threadID; }
-    ThreadState GetThreadState() override { return _threadState.load(std::memory_order_acquire); }
-    bool GetFreeOnTerminate() override { return _freeOnTerminate.load(std::memory_order_acquire); }
-    bool GetStartOnInitialize() override { return _startOnInitialize.load(std::memory_order_acquire); }
-
-    TOnThreadEvent GetOnDestroy() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onDestroy ? *_onDestroy : TOnThreadEvent{}; }
-    TOnThreadEvent GetOnInitialize() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onInitialize ? *_onInitialize : TOnThreadEvent{}; }
-    TOnThreadEvent GetOnStart() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onStart ? *_onStart : TOnThreadEvent{}; }
-    TOnThreadEvent GetOnPause() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onPause ? *_onPause : TOnThreadEvent{}; }
-    TOnThreadEvent GetOnTerminate() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onTerminate ? *_onTerminate : TOnThreadEvent{}; }
-    TOnThreadEvent GetOnTerminated() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onTerminated ? *_onTerminated : TOnThreadEvent{}; }
-    TOnThreadInitializationFailedEvent GetOnInitializationFailed() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onInitializationFailed ? *_onInitializationFailed : TOnThreadInitializationFailedEvent{}; }
-    TOnThreadExecutionFailedEvent GetOnExecutionFailed() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onExecutionFailed ? *_onExecutionFailed : TOnThreadExecutionFailedEvent{}; }
-    TOnThreadStateChangeEvent GetOnStateChange() override { std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); return _onStateChange ? *_onStateChange : TOnThreadStateChangeEvent{}; }
-
-    void SetCoreID(int value) override {
-        std::lock_guard<System::Synchronization::Mutex> lock(_taskConfigurationMutex);
-        if (_taskHandle.load(std::memory_order_acquire) == System::Execution::InvalidExecutionHandle) {
-            _coreID.store(value, std::memory_order_release);
-        }
-    }
-
-    void SetStackSize(uint32_t value) override {
-        std::lock_guard<System::Synchronization::Mutex> lock(_taskConfigurationMutex);
-        if (
-            _taskHandle.load(std::memory_order_acquire) == System::Execution::InvalidExecutionHandle &&
-            value > 0
-        ) _stackSize.store(value, std::memory_order_release);
-    }
-
-    void SetPriority(unsigned int value) override {
-        std::lock_guard<System::Synchronization::Mutex> lock(_taskConfigurationMutex);
-        if (_taskHandle.load(std::memory_order_acquire) == System::Execution::InvalidExecutionHandle) {
-            _priority.store(value, std::memory_order_release);
-        }
-    }
-
-    void SetFreeOnTerminate(bool value) override {
-        _freeOnTerminate.store(value, std::memory_order_release);
-        if (value) {
-            CleanupClaim expected = CleanupClaim::Manual;
-            _cleanupClaim.compare_exchange_strong(
-                expected,
-                CleanupClaim::Available,
-                std::memory_order_acq_rel,
-                std::memory_order_acquire
-            );
-        } else {
-            CleanupClaim expected = CleanupClaim::Available;
-            _cleanupClaim.compare_exchange_strong(
-                expected,
-                CleanupClaim::Manual,
-                std::memory_order_acq_rel,
-                std::memory_order_acquire
-            );
-        }
-    }
-
-    void SetStartOnInitialize(bool value) override {
-        _startOnInitialize.store(value, std::memory_order_release);
-    }
-
-    void SetOnDestroy(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onDestroy=std::move(c); }
-    void SetOnInitialize(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onInitialize=std::move(c); }
-    void SetOnStart(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onStart=std::move(c); }
-    void SetOnPause(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onPause=std::move(c); }
-    void SetOnTerminate(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onTerminate=std::move(c); }
-    void SetOnTerminated(TOnThreadEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onTerminated=std::move(c); }
-    void SetOnInitializationFailed(TOnThreadInitializationFailedEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onInitializationFailed=std::move(c); }
-    void SetOnExecutionFailed(TOnThreadExecutionFailedEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onExecutionFailed=std::move(c); }
-    void SetOnStateChange(TOnThreadStateChangeEvent value) override { auto c=MakeStableCallback(std::move(value)); std::lock_guard<System::Synchronization::Mutex> lock(_callbackMutex); _onStateChange=std::move(c); }
 };
-
-}
 }

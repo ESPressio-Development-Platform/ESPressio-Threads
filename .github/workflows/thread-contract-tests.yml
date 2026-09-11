@@ -1,0 +1,142 @@
+name: Consolidated Thread Contracts
+on: [push, pull_request]
+jobs:
+  native-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-System
+          ref: primitives_redesign
+          path: deps/ESPressio-System
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Task
+          ref: primitives_redesign
+          path: deps/ESPressio-Task
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Timing
+          ref: primitives_redesign
+          path: deps/ESPressio-Timing
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Units
+          ref: primitives_redesign
+          path: deps/ESPressio-Units
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Observable
+          ref: primitives_redesign
+          path: deps/ESPressio-Observable
+      - name: Configure and build actual dependency contracts
+        run: |
+          cmake -S tests -B build -DESPRESSIO_DEPENDENCIES="$GITHUB_WORKSPACE/deps"
+          cmake --build build --parallel
+      - name: Run lifecycle, wake, composition and cadence contracts
+        run: ctest --test-dir build --output-on-failure
+      - name: Compile README, independent headers and invalid compositions
+        run: python tests/validate_public_surface.py --dependencies deps
+      - name: Check dependency and predecessor boundaries
+        run: python tests/check_architecture.py
+  esp32-consumers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: project/ESPressio-Threads}
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-System
+          ref: primitives_redesign
+          path: project/dependencies/ESPressio-System
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Task
+          ref: primitives_redesign
+          path: project/dependencies/ESPressio-Task
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Timing
+          ref: primitives_redesign
+          path: project/dependencies/ESPressio-Timing
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Units
+          ref: primitives_redesign
+          path: project/dependencies/ESPressio-Units
+      - uses: actions/checkout@v4
+        with:
+          repository: ESPressio-Development-Platform/ESPressio-Observable
+          ref: primitives_redesign
+          path: project/dependencies/ESPressio-Observable
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.x'}
+      - run: pip install platformio
+      - name: Create no-RTTI pthread and WiFi coexistence consumers
+        shell: bash
+        run: |
+          mkdir -p project/compile/src
+          cat > project/compile/platformio.ini <<'INI'
+          [env:esp32]
+          platform = https://github.com/pioarduino/platform-espressif32/releases/download/55.03.311/platform-espressif32.zip
+          board = esp32dev
+          framework = arduino
+          build_flags = -std=gnu++17 -fno-rtti
+          build_unflags = -std=gnu++11 -frtti
+          lib_ldf_mode = deep+
+          lib_deps =
+              ../dependencies/ESPressio-System
+              ../dependencies/ESPressio-Task
+              ../dependencies/ESPressio-Timing
+              ../dependencies/ESPressio-Units
+              ../dependencies/ESPressio-Observable
+              ../ESPressio-Threads
+          INI
+          cat > project/compile/src/main.cpp <<'CPP'
+          #include <Arduino.h>
+          #include <WiFi.h>
+          #include <pthread.h>
+          #include <ESPressio_ThreadWith.hpp>
+          #include <ESPressio_Precision.hpp>
+          #include <ESPressio_ThreadStackTelemetry.hpp>
+          using namespace ESPressio::Threads;
+          class Probe final : public ThreadWith<Precision<8>> {
+          protected:
+              ThreadWorkDisposition OnLoop() override {
+                  pthread_key_t key{};
+                  if (pthread_key_create(&key,nullptr)==0) {
+                      static int sentinel=67;
+                      (void)pthread_setspecific(key,&sentinel);
+                      (void)pthread_getspecific(key);
+                      (void)pthread_key_delete(key);
+                  }
+                  (void)::WiFi.softAPgetStationNum();
+                  Terminate();
+                  return ThreadWorkDisposition::IdleReady;
+              }
+          public:
+              Probe() { GetCapability<PrecisionTag>().SetCadencePeriod(1000000); }
+              ~Probe() override { (void)Shutdown(); }
+          } probe;
+          static_assert(Probe::HasCapability<PrecisionTag>());
+          void setup() {
+              auto profile=GetThreadResourceProfile(probe);
+              auto stack=GetThreadStackTelemetry(probe);
+              (void)profile; (void)stack;
+              if (probe.Initialize()==ThreadStatus::Success) {
+                  (void)probe.Start(); (void)probe.Pause(); (void)probe.Start();
+                  (void)probe.WakeFromInterrupt(); probe.Terminate(); (void)probe.Shutdown();
+              }
+          }
+          void loop() { yield(); }
+          CPP
+      - name: Compile coordinated consumers
+        run: pio run -d project/compile
+      - name: Compile every maintained example
+        shell: bash
+        run: |
+          for example in project/ESPressio-Threads/examples/*/*.ino; do
+            cp "$example" project/compile/src/main.cpp
+            pio run -d project/compile
+          done

@@ -1,16 +1,5 @@
-set(COMPONENT_SRCDIRS
-    "src"
-)
-
-set(COMPONENT_ADD_INCLUDEDIRS
-    "src"
-)
-
-set(COMPONENT_REQUIRES
-    "ESPressio_Timing"
-    "ESPressio_Observable"
-)
-
+set(COMPONENT_SRCDIRS "src")
+set(COMPONENT_ADD_INCLUDEDIRS "src")
+set(COMPONENT_REQUIRES "ESPressio_System" "ESPressio_Task" "ESPressio_Timing" "ESPressio_Units")
 register_component()
-
-target_compile_definitions(${COMPONENT_TARGET} PUBLIC -DESP32)
+target_compile_features(${COMPONENT_TARGET} PUBLIC cxx_std_17)

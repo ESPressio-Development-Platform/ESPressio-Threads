@@ -1,50 +1,15 @@
-# ESPressio Dependency Chart — Current Released Generation
+# Threads coordinated dependency boundary
 
-![ESPressio Library Dependency Chart](ESPRESSIO_DEPENDENCY_CHART.svg)
+All repository references below use `primitives_redesign`.
 
-## Released generation
+| Repository | Ownership consumed by Threads |
+|---|---|
+| System | Execution provider, monotonic clock, synchronization |
+| Task | Queue-free physical execution configuration and TaskRuntime |
+| Timing | Monotonic numeric timing utilities |
+| Units | Platform-wide unit representation boundary |
 
-```text
-Observable
-Serializable
-Units
-Timing
-Threads
-Event
-Command
-Security
-Persistence
-Sockets
-ESP-Now
-WiFi
-Serial
-```
-
-## Threads dependency position
-
-```text
-Threads
-    -> Timing main
-    -> Observable main
-
-Threads Serializable integration
-    - - -> Serializable representations transitively through Units main
-```
-
-Threads deliberately does **not** declare Serializable as a core package dependency. `ESPressio_PrecisionThread.hpp` remains serialization-agnostic; Serializable time/frequency traits are opt-in.
-
-## Completed cascade
-
-```text
-Serializable
-    -> Units
-    -> Timing
-    -> Threads
-    -> Event
-    -> Command / Security
-    -> Persistence / Sockets / ESP-Now
-    -> WiFi
-    -> Serial
-```
-
-Event may consume Threads; Threads must not depend on Event. Serial remains terminal/downstream. ESPressio Tree remains standalone.
+Event, State and Command depend on Threads and own their respective capabilities.
+Threads has no dependency on these families, Primitive, Radio, Mesh or Adapters.
+Observable and Serializable are not direct Threads dependencies. Concrete native
+execution lives in the System provider, supplied by ESP32 on that platform.
